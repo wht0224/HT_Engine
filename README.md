@@ -145,8 +145,10 @@ engine.shutdown()
 This project is licensed under the MIT License - see the LICENSE file for details
 
 ## Contact Information
-Send an email to mailto:13910593150@139.com
-Send an email to mailto:wswht333@qq.com
+
+- Send an email to mailto:13910593150@139.com
+
+- Send an email to mailto:wswht333@qq.com
 ---
 
 Grant reality, unto all beings!
@@ -302,8 +304,10 @@ engine.shutdown()
 本项目采用MIT许可证 - 详情请查看LICENSE文件
 
 ## 联系方式
-给13910593150@139.com发邮件
-给wswht333@qq.com发邮件
+
+- 给13910593150@139.com发邮件
+  
+- 给wswht333@qq.com发邮件
 ---
 
 Grant reality, unto all beings!
