@@ -1,0 +1,1264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>低端GPU优化渲染引擎 - Spline风格</title>
+    <style>
+        /* 全局样式重置 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* 主容器 */
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: #f5f5f5;
+            color: #333333;
+            overflow: hidden;
+        }
+
+        /* 主布局容器 */
+        .main-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        /* 顶部导航栏 */
+        .top-nav {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background-color: #ffffff;
+            padding: 12px 20px;
+            border-bottom: 1px solid #e0e0e0;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        /* 左侧导航 */
+        .left-nav {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+
+        /* Logo */
+        .logo {
+            font-size: 20px;
+            font-weight: 600;
+            color: #1976d2;
+        }
+
+        /* 主导航菜单 */
+        .nav-menu {
+            display: flex;
+            gap: 16px;
+            list-style: none;
+        }
+
+        .nav-menu li {
+            position: relative;
+        }
+
+        .nav-menu a {
+            text-decoration: none;
+            color: #333333;
+            font-size: 14px;
+            font-weight: 500;
+            padding: 8px 12px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+
+        .nav-menu a:hover {
+            background-color: #f0f7ff;
+            color: #1976d2;
+        }
+
+        /* 右侧导航 */
+        .right-nav {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        /* 搜索框 */
+        .search-box {
+            position: relative;
+        }
+
+        .search-box input {
+            padding: 8px 32px 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 20px;
+            font-size: 14px;
+            background-color: #f5f5f5;
+            transition: all 0.2s ease;
+        }
+
+        .search-box input:focus {
+            outline: none;
+            border-color: #1976d2;
+            background-color: #ffffff;
+        }
+
+        /* 用户信息 */
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background-color: #f5f5f5;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .user-info:hover {
+            background-color: #e0e0e0;
+        }
+
+        /* 主内容区 */
+        .content-area {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* 左侧面板 */
+        .left-panel {
+            width: 250px;
+            background-color: #ffffff;
+            border-right: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* 左侧面板标签页 */
+        .panel-tabs {
+            display: flex;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            background-color: transparent;
+            font-size: 14px;
+            font-weight: 500;
+            color: #666666;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border-bottom: 2px solid transparent;
+        }
+
+        .tab-btn.active {
+            color: #1976d2;
+            border-bottom-color: #1976d2;
+            background-color: #f0f7ff;
+        }
+
+        .tab-btn:hover:not(.active) {
+            background-color: #f5f5f5;
+        }
+
+        /* 面板内容 */
+        .panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        /* 场景树 */
+        .scene-tree {
+            list-style: none;
+        }
+
+        .scene-tree-item {
+            margin: 4px 0;
+            padding: 6px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .scene-tree-item:hover {
+            background-color: #f0f7ff;
+        }
+
+        .scene-tree-item.active {
+            background-color: #e3f2fd;
+            color: #1976d2;
+        }
+
+        /* 对象库 */
+        .object-library {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+
+        .object-card {
+            background-color: #f5f5f5;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+
+        .object-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            border-color: #1976d2;
+        }
+
+        .object-card-icon {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+
+        .object-card-title {
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        /* 中央视图区 */
+        .viewport-area {
+            flex: 1;
+            background-color: #fafafa;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        /* 视图控制工具栏 */
+        .view-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background-color: #ffffff;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 8px 16px;
+        }
+
+        .control-btn {
+            padding: 6px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            background-color: #ffffff;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .control-btn:hover {
+            background-color: #f5f5f5;
+        }
+
+        .control-btn.active {
+            background-color: #1976d2;
+            color: #ffffff;
+            border-color: #1976d2;
+        }
+
+        /* 3D视图 */
+        .viewport {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #canvas {
+            width: 100%;
+            height: 100%;
+            background-color: #fafafa;
+            cursor: grab;
+        }
+
+        #canvas:active {
+            cursor: grabbing;
+        }
+
+        /* 右侧属性面板 */
+        .right-panel {
+            width: 300px;
+            background-color: #ffffff;
+            border-left: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* 属性面板标签页 */
+        .property-tabs {
+            display: flex;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        /* 属性组 */
+        .property-group {
+            margin-bottom: 16px;
+        }
+
+        .property-group-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #666666;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* 属性项 */
+        .property-item {
+            margin-bottom: 12px;
+        }
+
+        .property-label {
+            font-size: 12px;
+            font-weight: 500;
+            color: #666666;
+            margin-bottom: 4px;
+            display: block;
+        }
+
+        .property-input {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .property-input:focus {
+            outline: none;
+            border-color: #1976d2;
+        }
+
+        /* 颜色选择器 */
+        .color-input {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .color-preview {
+            width: 24px;
+            height: 24px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        /* 滑块输入 */
+        .slider-input {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .slider-input input[type="range"] {
+            flex: 1;
+        }
+
+        .slider-input input[type="number"] {
+            width: 60px;
+        }
+
+        /* 底部状态栏 */
+        .status-bar {
+            height: 32px;
+            background-color: #ffffff;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            gap: 24px;
+            font-size: 12px;
+            color: #666666;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* 渲染状态 */
+        .render-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #4caf50;
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 1200px) {
+            .left-panel {
+                width: 200px;
+            }
+            
+            .right-panel {
+                width: 250px;
+            }
+        }
+
+        /* 加载动画 */
+        .loading-spinner {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 40px;
+            height: 40px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #1976d2;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: translate(-50%, -50%) rotate(0deg); }
+            100% { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+
+        /* 消息提示 */
+        .message-toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background-color: #333333;
+            color: #ffffff;
+            padding: 12px 20px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 500;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            z-index: 1000;
+        }
+
+        .message-toast.show {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <!-- 顶部导航栏 -->
+        <header class="top-nav">
+            <div class="left-nav">
+                <div class="logo">低端GPU优化渲染引擎</div>
+                <ul class="nav-menu">
+                    <li><a href="#">文件</a></li>
+                    <li><a href="#">编辑</a></li>
+                    <li><a href="#">视图</a></li>
+                    <li><a href="#">对象</a></li>
+                    <li><a href="#">渲染</a></li>
+                    <li><a href="#">窗口</a></li>
+                    <li><a href="#">帮助</a></li>
+                </ul>
+            </div>
+            <div class="right-nav">
+                <div class="search-box">
+                    <input type="text" placeholder="搜索...">
+                </div>
+                <div class="user-info">
+                    <span>用户</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- 主内容区 -->
+        <main class="content-area">
+            <!-- 左侧面板 -->
+            <aside class="left-panel">
+                <!-- 左侧面板标签页 -->
+                <div class="panel-tabs">
+                    <button class="tab-btn active" data-tab="scene">场景树</button>
+                    <button class="tab-btn" data-tab="objects">对象库</button>
+                </div>
+
+                <!-- 场景树内容 -->
+                <div id="scene" class="panel-content">
+                    <ul class="scene-tree">
+                        <li class="scene-tree-item active">
+                            <span>🌍</span>
+                            <span>场景</span>
+                        </li>
+                        <li class="scene-tree-item" style="margin-left: 20px;">
+                            <span>📷</span>
+                            <span>相机</span>
+                        </li>
+                        <li class="scene-tree-item" style="margin-left: 20px;">
+                            <span>💡</span>
+                            <span>方向光</span>
+                        </li>
+                        <li class="scene-tree-item" style="margin-left: 20px;">
+                            <span>📦</span>
+                            <span>立方体</span>
+                        </li>
+                        <li class="scene-tree-item" style="margin-left: 20px;">
+                            <span>🔵</span>
+                            <span>球体</span>
+                        </li>
+                        <li class="scene-tree-item" style="margin-left: 20px;">
+                            <span>📏</span>
+                            <span>圆柱体</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- 对象库内容 -->
+                <div id="objects" class="panel-content" style="display: none;">
+                    <h3 style="margin-bottom: 16px; font-size: 14px; font-weight: 600;">基础几何体</h3>
+                    <div class="object-library">
+                        <div class="object-card" data-object="cube">
+                            <div class="object-card-icon">📦</div>
+                            <div class="object-card-title">立方体</div>
+                        </div>
+                        <div class="object-card" data-object="sphere">
+                            <div class="object-card-icon">🔵</div>
+                            <div class="object-card-title">球体</div>
+                        </div>
+                        <div class="object-card" data-object="cylinder">
+                            <div class="object-card-icon">📏</div>
+                            <div class="object-card-title">圆柱体</div>
+                        </div>
+                        <div class="object-card" data-object="plane">
+                            <div class="object-card-icon">📄</div>
+                            <div class="object-card-title">平面</div>
+                        </div>
+                        <div class="object-card" data-object="cone">
+                            <div class="object-card-icon">🔺</div>
+                            <div class="object-card-title">圆锥体</div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- 中央视图区 -->
+            <section class="viewport-area">
+                <!-- 视图控制工具栏 -->
+                <div class="view-controls">
+                    <button class="control-btn active" data-tool="select">选择</button>
+                    <button class="control-btn" data-tool="move">移动</button>
+                    <button class="control-btn" data-tool="rotate">旋转</button>
+                    <button class="control-btn" data-tool="scale">缩放</button>
+                    <div style="flex: 1;"></div>
+                    <button class="control-btn" data-view="perspective">透视</button>
+                    <button class="control-btn" data-view="orthographic">正交</button>
+                    <button class="control-btn" data-view="top">顶视图</button>
+                    <button class="control-btn" data-view="front">前视图</button>
+                    <button class="control-btn" data-view="right">右视图</button>
+                </div>
+
+                <!-- 3D视图 -->
+                <div class="viewport">
+                    <canvas id="canvas"></canvas>
+                    <div class="loading-spinner"></div>
+                </div>
+            </section>
+
+            <!-- 右侧属性面板 -->
+            <aside class="right-panel">
+                <!-- 属性面板标签页 -->
+                <div class="property-tabs">
+                    <button class="tab-btn active" data-tab="properties">属性</button>
+                    <button class="tab-btn" data-tab="render">渲染设置</button>
+                </div>
+
+                <!-- 属性内容 -->
+                <div id="properties" class="panel-content">
+                    <!-- 变换属性 -->
+                    <div class="property-group">
+                        <div class="property-group-title">变换</div>
+                        
+                        <!-- 位置 -->
+                        <div class="property-item">
+                            <label class="property-label">位置</label>
+                            <div style="display: flex; gap: 8px;">
+                                <div style="flex: 1;">
+                                    <input type="number" class="property-input" placeholder="X" value="0">
+                                </div>
+                                <div style="flex: 1;">
+                                    <input type="number" class="property-input" placeholder="Y" value="0">
+                                </div>
+                                <div style="flex: 1;">
+                                    <input type="number" class="property-input" placeholder="Z" value="0">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 旋转 -->
+                        <div class="property-item">
+                            <label class="property-label">旋转</label>
+                            <div style="display: flex; gap: 8px;">
+                                <div style="flex: 1;">
+                                    <input type="number" class="property-input" placeholder="X" value="0">
+                                </div>
+                                <div style="flex: 1;">
+                                    <input type="number" class="property-input" placeholder="Y" value="0">
+                                </div>
+                                <div style="flex: 1;">
+                                    <input type="number" class="property-input" placeholder="Z" value="0">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 缩放 -->
+                        <div class="property-item">
+                            <label class="property-label">缩放</label>
+                            <div style="display: flex; gap: 8px;">
+                                <div style="flex: 1;">
+                                    <input type="number" class="property-input" placeholder="X" value="1">
+                                </div>
+                                <div style="flex: 1;">
+                                    <input type="number" class="property-input" placeholder="Y" value="1">
+                                </div>
+                                <div style="flex: 1;">
+                                    <input type="number" class="property-input" placeholder="Z" value="1">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 材质属性 -->
+                    <div class="property-group">
+                        <div class="property-group-title">材质</div>
+                        
+                        <!-- 颜色 -->
+                        <div class="property-item">
+                            <label class="property-label">颜色</label>
+                            <div class="color-input">
+                                <div class="color-preview" style="background-color: #ffffff;"></div>
+                                <input type="color" class="property-input" value="#ffffff" style="flex: 1;">
+                            </div>
+                        </div>
+
+                        <!-- 金属度 -->
+                        <div class="property-item">
+                            <label class="property-label">金属度</label>
+                            <div class="slider-input">
+                                <input type="range" min="0" max="1" step="0.1" value="0">
+                                <input type="number" class="property-input" min="0" max="1" step="0.1" value="0">
+                            </div>
+                        </div>
+
+                        <!-- 粗糙度 -->
+                        <div class="property-item">
+                            <label class="property-label">粗糙度</label>
+                            <div class="slider-input">
+                                <input type="range" min="0" max="1" step="0.1" value="0.5">
+                                <input type="number" class="property-input" min="0" max="1" step="0.1" value="0.5">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 渲染设置内容 -->
+                <div id="render" class="panel-content" style="display: none;">
+                    <div class="property-group">
+                        <div class="property-group-title">渲染设置</div>
+                        
+                        <!-- 渲染质量 -->
+                        <div class="property-item">
+                            <label class="property-label">渲染质量</label>
+                            <select class="property-input">
+                                <option value="low">低</option>
+                                <option value="medium" selected>中</option>
+                                <option value="high">高</option>
+                            </select>
+                        </div>
+
+                        <!-- 抗锯齿 -->
+                        <div class="property-item">
+                            <label class="property-label">抗锯齿</label>
+                            <select class="property-input">
+                                <option value="none">无</option>
+                                <option value="fxaa">FXAA</option>
+                                <option value="msaa">MSAA</option>
+                            </select>
+                        </div>
+
+                        <!-- 阴影质量 -->
+                        <div class="property-item">
+                            <label class="property-label">阴影质量</label>
+                            <select class="property-input">
+                                <option value="low">低</option>
+                                <option value="medium" selected>中</option>
+                                <option value="high">高</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </main>
+
+        <!-- 底部状态栏 -->
+        <footer class="status-bar">
+            <div class="status-item">
+                <div class="status-indicator"></div>
+                <span>渲染中</span>
+            </div>
+            <div class="status-item">
+                <span>FPS: <span id="fps">0</span></span>
+            </div>
+            <div class="status-item">
+                <span>渲染时间: <span id="render-time">0</span>ms</span>
+            </div>
+            <div class="status-item">
+                <span>绘制调用: <span id="draw-calls">0</span></span>
+            </div>
+            <div class="status-item">
+                <span>三角形: <span id="triangles">0</span></span>
+            </div>
+            <div class="status-item">
+                <span>场景对象: <span id="objects-count">0</span></span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- 消息提示 -->
+    <div class="message-toast" id="message-toast"></div>
+
+    <script>
+        // WebSocket连接管理
+        class WebSocketManager {
+            constructor() {
+                this.socket = null;
+                this.isConnected = false;
+                this.reconnectAttempts = 0;
+                this.maxReconnectAttempts = 5;
+                this.reconnectDelay = 1000;
+            }
+
+            connect() {
+                // 获取当前页面的主机和端口
+                const host = window.location.hostname;
+                const port = window.location.port;
+                
+                // 尝试多个WebSocket端口，因为默认端口可能被占用
+                const wsPorts = [parseInt(port) + 1, parseInt(port) + 2, parseInt(port) + 3];
+                let socket = null;
+                let connected = false;
+                
+                for (const wsPort of wsPorts) {
+                    try {
+                        socket = new WebSocket(`ws://${host}:${wsPort}`);
+                        
+                        // 立即设置onopen事件处理程序，检查连接是否成功
+                        socket.onopen = () => {
+                            console.log(`WebSocket连接已建立到端口 ${wsPort}`);
+                            this.isConnected = true;
+                            this.reconnectAttempts = 0;
+                            this.hideLoading();
+                            this.showMessage('WebSocket连接已建立');
+                        };
+
+                        this.socket = socket;
+                        connected = true;
+                        break;
+                    } catch (error) {
+                        console.log(`WebSocket连接到端口 ${wsPort} 失败，尝试下一个端口...`);
+                    }
+                }
+                
+                if (!connected) {
+                    console.error('无法连接到任何WebSocket端口');
+                    this.showMessage('无法连接到WebSocket服务器，请检查服务器状态', 'error');
+                    return;
+                }
+                
+                // 设置其他WebSocket事件处理程序
+                this.socket.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    this.handleMessage(data);
+                };
+
+                this.socket.onclose = () => {
+                    console.log('WebSocket连接已关闭');
+                    this.isConnected = false;
+                    this.showLoading();
+                    this.attemptReconnect();
+                };
+
+                this.socket.onerror = (error) => {
+                    console.error('WebSocket错误:', error);
+                    this.showMessage('WebSocket连接错误', 'error');
+                };
+            }
+
+            handleMessage(data) {
+                switch (data.type) {
+                    case 'welcome':
+                        console.log('欢迎消息:', data.data);
+                        break;
+                    case 'initial_state':
+                        this.handleInitialState(data.data);
+                        break;
+                    case 'update_status':
+                        this.handleStatusUpdate(data.data);
+                        break;
+                    case 'render_frame':
+                        this.handleRenderFrame(data.data);
+                        break;
+                    case 'heartbeat':
+                        this.sendHeartbeat();
+                        break;
+                    case 'error':
+                        console.error('服务器错误:', data.data);
+                        this.showMessage(`服务器错误: ${data.data}`, 'error');
+                        break;
+                    case 'response':
+                        console.log('服务器响应:', data.data);
+                        this.showMessage(data.data);
+                        break;
+                    default:
+                        console.log('未知消息类型:', data.type);
+                }
+            }
+
+            handleInitialState(state) {
+                console.log('初始状态:', state);
+                // 更新场景对象数量
+                document.getElementById('objects-count').textContent = state.scene_info.objects_count;
+                // 更新引擎状态
+                const engineStatus = state.engine_status === 'running' ? '运行中' : '已停止';
+                document.querySelector('.status-item span:nth-child(2)').textContent = engineStatus;
+            }
+
+            handleStatusUpdate(status) {
+                // 更新FPS
+                document.getElementById('fps').textContent = status.fps;
+                // 更新渲染时间
+                document.getElementById('render-time').textContent = status.render_time_ms;
+                // 更新绘制调用
+                document.getElementById('draw-calls').textContent = status.draw_calls;
+                // 更新三角形数量
+                document.getElementById('triangles').textContent = status.triangles;
+                // 更新场景对象数量
+                document.getElementById('objects-count').textContent = status.scene_objects;
+            }
+
+            handleRenderFrame(frameData) {
+                // 处理渲染帧数据，更新Canvas
+                console.log('收到渲染帧数据');
+                
+                try {
+                    // 创建图像对象
+                    const img = new Image();
+                    img.onload = () => {
+                        // 绘制图像到Canvas
+                        const canvas = document.getElementById('canvas');
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    };
+                    img.src = frameData;
+                } catch (error) {
+                    console.error('处理渲染帧数据失败:', error);
+                }
+            }
+
+            sendHeartbeat() {
+                if (this.isConnected) {
+                    this.send({ type: 'heartbeat' });
+                }
+            }
+
+            send(message) {
+                if (this.isConnected) {
+                    this.socket.send(JSON.stringify(message));
+                } else {
+                    console.error('WebSocket未连接，无法发送消息');
+                    this.showMessage('WebSocket未连接，无法发送消息', 'error');
+                }
+            }
+
+            attemptReconnect() {
+                if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                    this.reconnectAttempts++;
+                    console.log(`尝试重新连接... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+                    setTimeout(() => {
+                        this.connect();
+                    }, this.reconnectDelay * this.reconnectAttempts);
+                } else {
+                    console.error('已达到最大重新连接次数');
+                    this.showMessage('无法连接到服务器，请刷新页面重试', 'error');
+                }
+            }
+
+            close() {
+                if (this.socket) {
+                    this.socket.close();
+                }
+            }
+
+            showLoading() {
+                const spinner = document.querySelector('.loading-spinner');
+                if (spinner) {
+                    spinner.style.display = 'block';
+                }
+            }
+
+            hideLoading() {
+                const spinner = document.querySelector('.loading-spinner');
+                if (spinner) {
+                    spinner.style.display = 'none';
+                }
+            }
+
+            showMessage(message, type = 'info') {
+                const toast = document.getElementById('message-toast');
+                toast.textContent = message;
+                toast.classList.add('show');
+                
+                setTimeout(() => {
+                    toast.classList.remove('show');
+                }, 3000);
+            }
+        }
+
+        // 初始化WebSocket连接
+        const wsManager = new WebSocketManager();
+        wsManager.connect();
+
+        // 页面加载完成后执行
+        document.addEventListener('DOMContentLoaded', () => {
+            // 初始化Canvas
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+
+            // 3D视图控制器
+            class ViewportController {
+                constructor(canvas, wsManager) {
+                    this.canvas = canvas;
+                    this.wsManager = wsManager;
+                    this.isMouseDown = false;
+                    this.lastMouseX = 0;
+                    this.lastMouseY = 0;
+                    this.isMiddleMouseDown = false;
+                    this.isRightMouseDown = false;
+                    this.setupEventListeners();
+                }
+
+                setupEventListeners() {
+                    // 鼠标事件
+                    this.canvas.addEventListener('mousedown', (e) => this.onMouseDown(e));
+                    this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
+                    this.canvas.addEventListener('mouseup', (e) => this.onMouseUp(e));
+                    this.canvas.addEventListener('wheel', (e) => this.onWheel(e));
+                    
+                    // 键盘事件
+                    document.addEventListener('keydown', (e) => this.onKeyDown(e));
+                }
+
+                onMouseDown(e) {
+                    this.isMouseDown = true;
+                    this.lastMouseX = e.clientX;
+                    this.lastMouseY = e.clientY;
+                    
+                    if (e.button === 1) { // 中键
+                        this.isMiddleMouseDown = true;
+                        e.preventDefault();
+                    } else if (e.button === 2) { // 右键
+                        this.isRightMouseDown = true;
+                        e.preventDefault();
+                    }
+                }
+
+                onMouseMove(e) {
+                    if (!this.isMouseDown) return;
+                    
+                    const deltaX = e.clientX - this.lastMouseX;
+                    const deltaY = e.clientY - this.lastMouseY;
+                    
+                    if (this.isRightMouseDown) {
+                        // 轨道旋转
+                        this.wsManager.send({
+                            type: 'camera_orbit',
+                            data: { deltaX, deltaY }
+                        });
+                    } else if (this.isMiddleMouseDown) {
+                        // 平移
+                        this.wsManager.send({
+                            type: 'camera_pan',
+                            data: { deltaX, deltaY }
+                        });
+                    }
+                    
+                    this.lastMouseX = e.clientX;
+                    this.lastMouseY = e.clientY;
+                }
+
+                onMouseUp(e) {
+                    this.isMouseDown = false;
+                    if (e.button === 1) {
+                        this.isMiddleMouseDown = false;
+                    } else if (e.button === 2) {
+                        this.isRightMouseDown = false;
+                    }
+                }
+
+                onWheel(e) {
+                    e.preventDefault();
+                    // 缩放
+                    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+                    this.wsManager.send({
+                        type: 'camera_zoom',
+                        data: { delta }
+                    });
+                }
+
+                onKeyDown(e) {
+                    // WASD移动相机
+                    const directionMap = {
+                        'w': 'forward',
+                        's': 'backward',
+                        'a': 'left',
+                        'd': 'right',
+                        'q': 'up',
+                        'e': 'down'
+                    };
+                    
+                    const direction = directionMap[e.key.toLowerCase()];
+                    if (direction) {
+                        e.preventDefault();
+                        this.wsManager.send({
+                            type: 'camera_move',
+                            data: { direction }
+                        });
+                    }
+                }
+            }
+
+            // 调整Canvas大小
+            function resizeCanvas() {
+                const viewport = document.querySelector('.viewport');
+                canvas.width = viewport.clientWidth;
+                canvas.height = viewport.clientHeight;
+            }
+
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            
+            // 禁止Canvas右键菜单
+            canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+            // 绘制简单的加载画面
+            function drawLoadingScreen() {
+                ctx.fillStyle = '#fafafa';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // 绘制简单的3D坐标轴
+                ctx.lineWidth = 2;
+                
+                // X轴 - 红色
+                ctx.strokeStyle = '#ff0000';
+                ctx.beginPath();
+                ctx.moveTo(canvas.width / 2 - 50, canvas.height / 2);
+                ctx.lineTo(canvas.width / 2 + 50, canvas.height / 2);
+                ctx.stroke();
+                
+                // Y轴 - 绿色
+                ctx.strokeStyle = '#00ff00';
+                ctx.beginPath();
+                ctx.moveTo(canvas.width / 2, canvas.height / 2 - 50);
+                ctx.lineTo(canvas.width / 2, canvas.height / 2 + 50);
+                ctx.stroke();
+                
+                // Z轴 - 蓝色
+                ctx.strokeStyle = '#0000ff';
+                ctx.beginPath();
+                ctx.moveTo(canvas.width / 2 - 35, canvas.height / 2 - 35);
+                ctx.lineTo(canvas.width / 2 + 35, canvas.height / 2 + 35);
+                ctx.stroke();
+
+                // 绘制简单的立方体
+                ctx.strokeStyle = '#333333';
+                ctx.beginPath();
+                ctx.moveTo(canvas.width / 2 - 20, canvas.height / 2 - 20);
+                ctx.lineTo(canvas.width / 2 + 20, canvas.height / 2 - 20);
+                ctx.lineTo(canvas.width / 2 + 20, canvas.height / 2 + 20);
+                ctx.lineTo(canvas.width / 2 - 20, canvas.height / 2 + 20);
+                ctx.closePath();
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(canvas.width / 2 - 10, canvas.height / 2 - 30);
+                ctx.lineTo(canvas.width / 2 + 30, canvas.height / 2 - 30);
+                ctx.lineTo(canvas.width / 2 + 30, canvas.height / 2 + 10);
+                ctx.lineTo(canvas.width / 2 - 10, canvas.height / 2 + 10);
+                ctx.closePath();
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(canvas.width / 2 - 20, canvas.height / 2 - 20);
+                ctx.lineTo(canvas.width / 2 - 10, canvas.height / 2 - 30);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(canvas.width / 2 + 20, canvas.height / 2 - 20);
+                ctx.lineTo(canvas.width / 2 + 30, canvas.height / 2 - 30);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(canvas.width / 2 + 20, canvas.height / 2 + 20);
+                ctx.lineTo(canvas.width / 2 + 30, canvas.height / 2 + 10);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(canvas.width / 2 - 20, canvas.height / 2 + 20);
+                ctx.lineTo(canvas.width / 2 - 10, canvas.height / 2 + 10);
+                ctx.stroke();
+
+                // 绘制3D视图提示文字
+                ctx.fillStyle = '#666666';
+                ctx.font = '14px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('低端GPU优化渲染引擎', canvas.width / 2, canvas.height / 2 + 80);
+                ctx.fillText('正在等待渲染数据...', canvas.width / 2, canvas.height / 2 + 100);
+                ctx.fillText('右键拖动: 旋转视角 | 中键拖动: 平移 | 滚轮: 缩放 | WASD: 移动相机', canvas.width / 2, canvas.height / 2 + 120);
+            }
+
+            drawLoadingScreen();
+            
+            // 初始化3D视图控制器
+            const viewportController = new ViewportController(canvas, wsManager);
+
+            // 初始化标签页切换
+            initializeTabs();
+            
+            // 初始化视图控制
+            initializeViewControls();
+            
+            // 初始化对象库
+            initializeObjectLibrary();
+            
+            // 初始化场景树
+            initializeSceneTree();
+        });
+
+        // 初始化标签页切换
+        function initializeTabs() {
+            // 左侧面板标签页
+            const leftTabBtns = document.querySelectorAll('.left-panel .tab-btn');
+            leftTabBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    // 移除所有活动状态
+                    leftTabBtns.forEach(b => b.classList.remove('active'));
+                    // 添加当前活动状态
+                    btn.classList.add('active');
+                    
+                    // 隐藏所有面板内容
+                    const tabContents = document.querySelectorAll('.left-panel .panel-content');
+                    tabContents.forEach(content => content.style.display = 'none');
+                    
+                    // 显示当前面板内容
+                    const tabId = btn.dataset.tab;
+                    document.getElementById(tabId).style.display = 'block';
+                });
+            });
+
+            // 右侧面板标签页
+            const rightTabBtns = document.querySelectorAll('.right-panel .tab-btn');
+            rightTabBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    // 移除所有活动状态
+                    rightTabBtns.forEach(b => b.classList.remove('active'));
+                    // 添加当前活动状态
+                    btn.classList.add('active');
+                    
+                    // 隐藏所有面板内容
+                    const tabContents = document.querySelectorAll('.right-panel .panel-content');
+                    tabContents.forEach(content => content.style.display = 'none');
+                    
+                    // 显示当前面板内容
+                    const tabId = btn.dataset.tab;
+                    document.getElementById(tabId).style.display = 'block';
+                });
+            });
+        }
+
+        // 初始化视图控制
+        function initializeViewControls() {
+            const controlBtns = document.querySelectorAll('.control-btn');
+            controlBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    // 如果是工具按钮，移除其他工具按钮的活动状态
+                    if (btn.dataset.tool) {
+                        const toolBtns = document.querySelectorAll('.control-btn[data-tool]');
+                        toolBtns.forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                    }
+                    
+                    // 发送控制命令
+                    if (btn.dataset.tool) {
+                        wsManager.send({ type: `tool_${btn.dataset.tool}` });
+                    } else if (btn.dataset.view) {
+                        wsManager.send({ type: `view_${btn.dataset.view}` });
+                    }
+                });
+            });
+        }
+
+        // 初始化对象库
+        function initializeObjectLibrary() {
+            const objectCards = document.querySelectorAll('.object-card');
+            objectCards.forEach(card => {
+                card.addEventListener('click', () => {
+                    const objectType = card.dataset.object;
+                    console.log(`创建${objectType}`);
+                    // 发送创建对象命令
+                    wsManager.send({ type: `create_${objectType}` });
+                    // 显示成功消息
+                    wsManager.showMessage(`${objectType}已创建`);
+                });
+            });
+        }
+
+        // 初始化场景树
+        function initializeSceneTree() {
+            const sceneTreeItems = document.querySelectorAll('.scene-tree-item');
+            sceneTreeItems.forEach(item => {
+                item.addEventListener('click', () => {
+                    // 移除所有活动状态
+                    sceneTreeItems.forEach(i => i.classList.remove('active'));
+                    // 添加当前活动状态
+                    item.classList.add('active');
+                    // 发送选择节点命令
+                    const nodeName = item.querySelector('span:nth-child(2)').textContent;
+                    wsManager.send({ type: 'select_node', data: nodeName });
+                });
+            });
+        }
+
+        // 窗口关闭时关闭WebSocket连接
+        window.addEventListener('beforeunload', () => {
+            wsManager.close();
+        });
+    </script>
+</body>
+</html>
