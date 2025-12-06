@@ -319,9 +319,7 @@ python performance_benchmark.py
 
 ## 联系方式
 
-- 项目主页：[项目GitHub链接]
-- 问题反馈：[Issues页面]
-- 技术讨论：[Discussions页面]
+- 邮箱：[13910593150@139.com]
 
 ---
 
