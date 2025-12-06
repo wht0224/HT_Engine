@@ -276,7 +276,7 @@ This project is licensed under the MIT License - see LICENSE file for details
 
 ## Contact
 
-- Email: [13910593150@139.com]
+- Email: 13910593150@139.com
 ---
 
 Grant reality, unto all beings!
