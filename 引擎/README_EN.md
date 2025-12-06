@@ -276,10 +276,7 @@ This project is licensed under the MIT License - see LICENSE file for details
 
 ## Contact
 
-- Project Home: [Project GitHub Link]
-- Issue Reporting: [Issues Page]
-- Technical Discussion: [Discussions Page]
-
+- Email: [13910593150@139.com]
 ---
 
 Grant reality, unto all beings!
