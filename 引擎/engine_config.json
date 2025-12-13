@@ -1,0 +1,28 @@
+{
+  "frontend": {
+    "type": "tkinter",
+    "enable_html": false,
+    "enable_tkinter": true
+  },
+  "ui": {
+    "theme": "dark",
+    "layout": "blender_style",
+    "enable_docking": false,
+    "enable_gizmos": false
+  },
+  "viewport": {
+    "default_view": "perspective",
+    "show_grid": true,
+    "show_axes": true,
+    "background_color": [0.15, 0.15, 0.15, 1.0]
+  },
+  "logging": {
+    "level": "WARNING",
+    "enable_file_logging": false,
+    "log_file": "engine.log"
+  },
+  "renderer": {
+    "enable_render_result": true,
+    "render_result_interval": 33
+  }
+}

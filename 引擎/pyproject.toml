@@ -1,0 +1,45 @@
+[project]
+name = "EngineMath"
+version = "1.0"
+description = "Optimized math library for game engine"
+authors = [
+    { name = "Engine Developer", email = "developer@example.com" },
+]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "numpy>=1.20.0",
+    "cython>=0.29.0",
+]
+
+[build-system]
+requires = ["setuptools>=42", "wheel", "Cython>=0.29.0", "numpy>=1.20.0"]
+build-backend = "setuptools.build_meta"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0.0",
+    "black>=21.0.0",
+    "flake8>=3.9.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["Engine"]
+
+# [tool.setuptools.ext_modules]
+# "Engine.Math.CythonMath" = {
+#     sources = ["Engine/Math/CythonMath.pyx"],
+#     include_dirs = ["numpy.get_include()"],
+#     language = "c",
+# }
+
+[tool.cython]
+language_level = "3"
+boundscheck = false
+wraparound = false
+cdivision = true
+nonecheck = false
+overflowcheck = false
+embedsignature = true
+profile = false
+linetrace = false

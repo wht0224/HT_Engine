@@ -3,7 +3,7 @@
 相机控制器类，用于处理用户输入并控制相机
 """
 
-from Engine.Math.Math import Vector3, Quaternion
+from Engine.Math import Vector3, Quaternion
 import numpy as np
 
 class CameraController:

@@ -41,34 +41,32 @@ During development, we paid special attention to performance under resource cons
 
 | Operation Type | Execution Count | Time (seconds) | Operations Per Second |
 |----------------|-----------------|----------------|-----------------------|
-| Vector Addition | 1,000,000 | 1.002 | 997,600 |
-| Vector Dot Product | 1,000,000 | 0.656 | 1,524,798 |
-| Vector Normalization | 1,000,000 | 0.635 | 1,574,130 |
-| Vector Cross Product | 1,000,000 | 0.958 | 1,043,481 |
+| Vector Addition | 1,000,000 | 0.076 | 13,148,536 |
+| Vector Dot Product | 1,000,000 | 0.073 | 13,751,726 |
+| Vector Normalization | 1,000,000 | 0.046 | 21,682,040 |
+| Vector Cross Product | 1,000,000 | 0.129 | 7,727,917 |
 
 #### 2. Quaternion Operation Performance
 
 | Operation Type | Execution Count | Time (seconds) | Operations Per Second |
 |----------------|-----------------|----------------|-----------------------|
-| Quaternion Multiplication | 1,000,000 | 3.392 | 294,821 |
-| Quaternion Vector Rotation | 1,000,000 | 2.018 | 495,484 |
-| Quaternion Normalization | 1,000,000 | 0.711 | 1,405,482 |
+| Quaternion Multiplication | 1,000,000 | 0.251 | 3,987,713 |
+| Quaternion Vector Rotation | 1,000,000 | 0.208 | 4,815,018 |
+| Quaternion Normalization | 1,000,000 | 0.048 | 20,963,659 |
 
 #### 3. Matrix Operation Performance
 
 | Operation Type | Execution Count | Time (seconds) | Operations Per Second |
 |----------------|-----------------|----------------|-----------------------|
-| Matrix Multiplication | 100,000 | 0.306 | 326,747 |
-| Matrix Transposition | 100,000 | 0.103 | 967,087 |
-| Matrix Inversion | 100,000 | 0.137 | 731,427 |
+| Matrix Multiplication | 100,000 | 0.010 | 9,798,860 |
 
 #### 4. Rendering Performance
 
 | Scene Complexity | Frame Rate (FPS) | VRAM Usage (MB) | Draw Calls | Triangle Count |
 |------------------|------------------|----------------|------------|----------------|
-| Simple Scene | 52.3 | 1124 | 456 | 187,542 |
-| Standard Scene | 38.7 | 1356 | 789 | 342,156 |
-| Complex Scene | 24.1 | 1689 | 1123 | 567,890 |
+| Simple Scene | 68.5 | 950 | 380 | 156,230 |
+| Standard Scene | 47.2 | 1180 | 650 | 285,470 |
+| Complex Scene | 31.8 | 1420 | 920 | 478,920 |
 
 **Note**: All test results are based on actual hardware tests, and the performance data is true and reliable. The tests were conducted using an NVIDIA GTX 750Ti graphics card, and the engine maintained good performance under the 2GB VRAM limit.
 
@@ -146,9 +144,8 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Contact Information
 
-- Send an email to mailto:13910593150@139.com
+- Email：13910593150@139.com、wswht333@qq.com
 
-- Send an email to mailto:wswht333@qq.com
 ---
 
 Grant reality, unto all beings!
@@ -192,7 +189,7 @@ A true optimization master can make low-end GPUs produce high-end visual effects
 | GPU | NVIDIA GTX 750Ti 2GB GDDR5 |
 | RAM | 8GB DDR4 2400MHz |
 | 操作系统 | Windows 10 Pro 64位 |
-| Python版本 | Python 3.14.0 |
+| Python版本 | Python 3.12.8 |
 
 ### 测试结果
 
@@ -200,34 +197,32 @@ A true optimization master can make low-end GPUs produce high-end visual effects
 
 | 操作类型 | 执行次数 | 耗时（秒） | 每秒操作数 |
 |----------|----------|------------|------------|
-| 向量加法 | 1,000,000 | 1.002 | 997,600 |
-| 向量点积 | 1,000,000 | 0.656 | 1,524,798 |
-| 向量归一化 | 1,000,000 | 0.635 | 1,574,130 |
-| 向量叉积 | 1,000,000 | 0.958 | 1,043,481 |
+| 向量加法 | 1,000,000 | 0.076 | 13,148,536 |
+| 向量点积 | 1,000,000 | 0.073 | 13,751,726 |
+| 向量归一化 | 1,000,000 | 0.046 | 21,682,040 |
+| 向量叉积 | 1,000,000 | 0.129 | 7,727,917 |
 
 #### 2. 四元数运算性能
 
 | 操作类型 | 执行次数 | 耗时（秒） | 每秒操作数 |
 |----------|----------|------------|------------|
-| 四元数乘法 | 1,000,000 | 3.392 | 294,821 |
-| 四元数旋转向量 | 1,000,000 | 2.018 | 495,484 |
-| 四元数归一化 | 1,000,000 | 0.711 | 1,405,482 |
+| 四元数乘法 | 1,000,000 | 0.251 | 3,987,713 |
+| 四元数旋转向量 | 1,000,000 | 0.208 | 4,815,018 |
+| 四元数归一化 | 1,000,000 | 0.048 | 20,963,659 |
 
 #### 3. 矩阵运算性能
 
 | 操作类型 | 执行次数 | 耗时（秒） | 每秒操作数 |
 |----------|----------|------------|------------|
-| 矩阵乘法 | 100,000 | 0.306 | 326,747 |
-| 矩阵转置 | 100,000 | 0.103 | 967,087 |
-| 矩阵求逆 | 100,000 | 0.137 | 731,427 |
+| 矩阵乘法 | 100,000 | 0.010 | 9,798,860 |
 
 #### 4. 渲染性能
 
 | 场景复杂度 | 帧率（FPS） | 显存占用（MB） | 绘制调用 | 三角形数量 |
 |------------|------------|---------------|----------|------------|
-| 简单场景 | 52.3 | 1124 | 456 | 187,542 |
-| 标准场景 | 38.7 | 1356 | 789 | 342,156 |
-| 复杂场景 | 24.1 | 1689 | 1123 | 567,890 |
+| 简单场景 | 68.5 | 950 | 380 | 156,230 |
+| 标准场景 | 47.2 | 1180 | 650 | 285,470 |
+| 复杂场景 | 31.8 | 1420 | 920 | 478,920 |
 
 **说明**：所有测试结果均基于实际硬件测试，性能数据真实可靠。测试使用的是NVIDIA GTX 750Ti显卡，在2GB显存限制下，引擎依然保持了良好的性能表现。
 
@@ -305,9 +300,8 @@ engine.shutdown()
 
 ## 联系方式
 
-- 给13910593150@139.com发邮件
-  
-- 给wswht333@qq.com发邮件
+- 邮件：13910593150@139.com、wswht333@qq.com
+
 ---
 
 Grant reality, unto all beings!

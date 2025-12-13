@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 MCP架构核心模块
 提供Model-Controller-Processor三层架构的实现

@@ -4,7 +4,7 @@
 支持物体破碎成多个物理块
 """
 
-from Engine.Math.Math import Vector3, Quaternion, Matrix4x4
+from Engine.Math import Vector3, Quaternion, Matrix4x4
 from Engine.Scene.SceneNode import SceneNode
 
 class DestructibleObject:

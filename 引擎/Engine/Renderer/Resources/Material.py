@@ -3,7 +3,7 @@
 材质资源类，用于管理3D模型的材质属性
 """
 
-from Engine.Math.Math import Vector3
+from Engine.Math import Vector3
 
 class Material:
     """材质资源类，用于管理3D模型的材质属性"""

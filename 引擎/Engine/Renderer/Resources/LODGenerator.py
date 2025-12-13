@@ -9,23 +9,28 @@ class LODGenerator:
     """
     
     def __init__(self):
-        # 默认LOD级别设置
-        self.default_lod_levels = [1.0, 0.5, 0.25, 0.1]  # 原始尺寸的百分比
+        # 默认LOD级别设置 - 更细粒度的LOD级别，适合低端GPU
+        self.default_lod_levels = [1.0, 0.8, 0.6, 0.4, 0.2, 0.1]  # 更细粒度的分辨率级别
         
-        # 优化设置
+        # 优化设置 - 针对低端GPU调整
         self.optimization_settings = {
             "preserve_silhouettes": True,    # 保留模型轮廓
             "preserve_boundaries": True,    # 保留边界
             "preserve_texture_seams": True, # 保留纹理接缝
             "aggressive_normals": False,    # 法线优化强度
-            "error_threshold": 0.005        # 几何误差阈值
+            "error_threshold": 0.01,        # 针对低端GPU放宽几何误差阈值
+            "enable_backface_culling": True, # 启用背面剔除
+            "enable_vertex_cache_optimization": True, # 启用顶点缓存优化
+            "disable_unused_attributes": True # 禁用未使用的顶点属性
         }
         
         # 性能预算（每个LOD级别的最大三角形数量）
+        # 针对低端GPU，增加了更激进的简化比例
         self.performance_budgets = {
             "high": [100, 50, 25, 10],     # 高端设置（每1000三角形的百分比）
             "medium": [80, 40, 20, 8],     # 中端设置
-            "low": [60, 30, 15, 5]         # 低端设置
+            "low": [50, 20, 10, 3],        # 低端设置 - 更激进的简化
+            "ultra_low": [40, 15, 5, 2]     # 超低端设置 - 针对2GB VRAM GPU
         }
         
         # 材质复杂度影响因子

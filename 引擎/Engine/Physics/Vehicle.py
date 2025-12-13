@@ -5,7 +5,7 @@
 """
 
 import math
-from Engine.Math.Math import Vector3, Quaternion, Matrix4x4
+from Engine.Math import Vector3, Quaternion, Matrix4x4
 from Engine.Scene.SceneNode import SceneNode
 
 class Vehicle:

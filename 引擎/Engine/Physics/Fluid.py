@@ -4,7 +4,7 @@
 基于粒子的简化流体模拟，适合低端GPU
 """
 
-from Engine.Math.Math import Vector3, Quaternion, Matrix4x4
+from Engine.Math import Vector3, Quaternion, Matrix4x4
 from Engine.Scene.SceneNode import SceneNode
 import random
 

@@ -6,7 +6,7 @@ MCP架构 - Model层
 
 from Engine.Scene.SceneManager import SceneManager
 from Engine.Scene.SceneNode import SceneNode
-from Engine.Math.Math import Vector3, Quaternion, Matrix4x4
+from Engine.Math import Vector3, Quaternion, Matrix4x4
 from Engine.Renderer.Resources.Mesh import Mesh
 from Engine.Renderer.Resources.Material import Material
 

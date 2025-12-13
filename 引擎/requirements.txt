@@ -38,6 +38,17 @@ imageio>=2.9.0  # 图像读取和处理，支持各种格式
 # bpy>=2.93.0  # Blender Python API，需要单独安装
 # 请参考Blender官方文档获取bpy的安装方法，不在PyPI上直接提供
 
+# UI框架（Tkinter + OpenGL）
+pyopengltk>=1.0.0  # Tkinter中嵌入OpenGL的专业库
+
+# 3D模型加载（支持多种格式）
+trimesh>=3.15.0  # 通用3D模型加载器，支持OBJ/STL/PLY/GLTF/FBX等30+格式
+
+# HTTP API服务器（MCP支持）
+flask>=2.3.0  # HTTP API服务器
+flask-cors>=4.0.0  # 跨域支持
+requests>=2.31.0  # HTTP客户端
+
 # 安装说明：
 # pip install -r requirements.txt
 # 对于最佳性能，确保所有可选优化库都已安装

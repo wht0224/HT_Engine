@@ -3,7 +3,7 @@
 变换操纵器控件，用于在3D场景中平移、旋转和缩放对象
 """
 
-from Engine.Math.Math import Vector3, Matrix4x4, Quaternion
+from Engine.Math import Vector3, Matrix4x4, Quaternion
 from Engine.UI.Controls.Control import Control
 from Engine.UI.Event import EventType
 

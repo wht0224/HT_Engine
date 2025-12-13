@@ -3,10 +3,9 @@ import os
 import subprocess
 import re
 
-# 尝试导入PyOpenGL和GLUT
+# 尝试导入PyOpenGL（不再需要GLUT）
 try:
     from OpenGL.GL import *
-    from OpenGL.GLUT import *
     HAS_OPENGL = True
 except ImportError:
     HAS_OPENGL = False
@@ -18,6 +17,10 @@ class Platform:
     """
     
     def __init__(self):
+        # 导入日志系统
+        from ..Logger import get_logger
+        self.logger = get_logger("Platform")
+        
         self.os_type = None
         self.gpu_info = None
         self.gpu_name = "未知GPU"  # 与Benchmark.py兼容的属性
@@ -53,7 +56,7 @@ class Platform:
         # 使用模块级别的OpenGL导入结果
         self.has_graphics = HAS_OPENGL
         if not self.has_graphics:
-            print("警告: 未安装PyOpenGL，无法创建图形界面")
+            self.logger.warning("未安装PyOpenGL，无法创建图形界面")
     
     # initialize方法已在文件后面重新定义，包含更完整的实现
     
@@ -62,28 +65,18 @@ class Platform:
         关闭平台层，释放资源
         """
         print("关闭平台抽象层")
-        
-        # 关闭窗口和释放渲染资源
-        if self.has_graphics and self.window_created:
-            try:
-                print("关闭图形窗口...")
-                glutLeaveMainLoop()
-            except:
-                pass
-        
+
         # 释放平台相关资源
         self.supported_features.clear()
-        
+
     def is_window_open(self):
         """
-        检查窗口是否仍然打开
-        
+        检查窗口是否仍然打开（由Tkinter管理）
+
         Returns:
             bool: 窗口是否打开
         """
-        if self.has_graphics and self.window_created:
-            # 处理窗口事件
-            glutMainLoopEvent()
+        # 窗口状态由Tkinter UI管理
         return self.is_window_open_flag
     
     def _detect_os(self):
@@ -113,191 +106,231 @@ class Platform:
         self.is_low_end = True  # 默认低端GPU
         
         try:
-            # 尝试检测常见GPU型号
-            if self.os_type == "Windows":
-                # Windows系统下使用dxdiag检测所有GPU
-                try:
-                    # 使用临时文件路径避免权限问题
-                    import tempfile
-                    with tempfile.NamedTemporaryFile(suffix='.txt', delete=False) as tmp:
-                        tmp_path = tmp.name
-                    
-                    # 执行dxdiag命令，添加5秒超时
-                    subprocess.run(['dxdiag', '/t', tmp_path], shell=True, check=True, timeout=5)
-                    
-                    # 尝试不同的编码读取文件
-                    try:
-                        with open(tmp_path, 'r', encoding='utf-16') as f:
-                            dxdiag_output = f.read()
-                    except UnicodeDecodeError:
-                        with open(tmp_path, 'r', encoding='utf-8', errors='replace') as f:
-                            dxdiag_output = f.read()
-                    
-                    # 保存输出以便其他方法使用
-                    self.dxdiag_output = dxdiag_output
-                    
-                    # 提取所有GPU信息
-                    gpu_cards = []
-                    
-                    # 分割dxdiag输出，查找所有显卡信息
-                    lines = dxdiag_output.split('\n')
-                    current_gpu = {}
-                    
-                    for line in lines:
-                        line = line.strip()
-                        
-                        # 检测新的显卡信息
-                        if line.startswith('Card name:'):
-                            # 如果已经有一个GPU，保存它
-                            if current_gpu:
-                                gpu_cards.append(current_gpu)
-                                current_gpu = {}
-                            
-                            current_gpu['name'] = line.split(':', 1)[1].strip()
-                        elif line.startswith('Manufacturer:'):
-                            current_gpu['manufacturer'] = line.split(':', 1)[1].strip()
-                        elif line.startswith('Chip type:'):
-                            current_gpu['chip_type'] = line.split(':', 1)[1].strip()
-                        elif line.startswith('Dedicated Memory:'):
-                            vram_match = re.search(r'(\d+)\s*MB', line)
-                            if vram_match:
-                                current_gpu['vram_mb'] = int(vram_match.group(1))
-                        elif line.startswith('Shared Memory:'):
-                            shared_vram_match = re.search(r'(\d+)\s*MB', line)
-                            if shared_vram_match:
-                                current_gpu['shared_vram_mb'] = int(shared_vram_match.group(1))
-                    
-                    # 保存最后一个GPU
-                    if current_gpu:
-                        gpu_cards.append(current_gpu)
-                    
-                    # 优先选择独立显卡
-                    selected_gpu = None
-                    
-                    # 首先寻找NVIDIA或AMD的独立显卡
-                    for gpu in gpu_cards:
-                        if 'name' in gpu:
-                            gpu_name_lower = gpu['name'].lower()
-                            # 排除Intel集成显卡
-                            if "nvidia" in gpu_name_lower or "amd" in gpu_name_lower or "radeon" in gpu_name_lower:
-                                selected_gpu = gpu
-                                break
-                    
-                    # 如果没有找到独立显卡，使用第一个GPU
-                    if not selected_gpu and gpu_cards:
-                        selected_gpu = gpu_cards[0]
-                    
-                    # 如果找到了GPU，设置GPU信息
-                    if selected_gpu:
-                        self.gpu_info = selected_gpu['name']
-                        self.gpu_name = selected_gpu['name']
-                        
-                        # 检测GPU厂商
-                        if "NVIDIA" in self.gpu_name:
-                            self.gpu_vendor = "NVIDIA"
-                        elif "AMD" in self.gpu_name or "Radeon" in self.gpu_name:
-                            self.gpu_vendor = "AMD"
-                        elif "Intel" in self.gpu_name:
-                            self.gpu_vendor = "Intel"
-                        
-                        # 检测VRAM信息
-                        if 'vram_mb' in selected_gpu:
-                            self.total_vram = selected_gpu['vram_mb']
-                        
-                        # 检测GPU架构
-                        self._detect_gpu_architecture()
-                        
-                        # 检测GPU驱动信息
-                        if self.os_type == "Windows":
-                            # 从dxdiag输出中提取驱动版本
-                            driver_section = dxdiag_output.split('Display Devices')[1] if 'Display Devices' in dxdiag_output else dxdiag_output
-                            
-                            # 查找驱动版本
-                            driver_ver_match = re.search(r'Driver Version:\s*(.+)', driver_section)
-                            if driver_ver_match:
-                                self.gpu_driver_version = driver_ver_match.group(1).strip()
-                            
-                            # 查找驱动日期
-                            driver_date_match = re.search(r'Driver Date:\s*(.+)', driver_section)
-                            if driver_date_match:
-                                self.gpu_driver_date = driver_date_match.group(1).strip()
-                    
-                    print(f"检测到 {len(gpu_cards)} 个GPU设备，优先使用: {self.gpu_name}")
-                    for i, gpu in enumerate(gpu_cards):
-                        vram = gpu.get('vram_mb', '未知')
-                        print(f"  GPU {i+1}: {gpu.get('name', '未知')}, VRAM: {vram} MB")
-                    
-                except Exception as e:
-                    # 如果dxdiag失败，使用简单的GPU模拟
-                    print(f"dxdiag检测失败 ({e})，使用模拟GPU信息")
-                    self.gpu_info = "模拟GTX 750Ti"
-                    self.gpu_name = "GTX 750Ti"
+            # 首先尝试使用torch.cuda.is_available()检测NVIDIA GPU，这是最可靠的方法
+            try:
+                import torch
+                if torch.cuda.is_available():
                     self.gpu_vendor = "NVIDIA"
-                    self.gpu_architecture = "maxwell"
-                    self.total_vram = 2048
-                finally:
-                    # 清理临时文件
+                    self.gpu_name = torch.cuda.get_device_name(0)
+                    self.gpu_info = self.gpu_name
+                    self.total_vram = torch.cuda.get_device_properties(0).total_memory // (1024 * 1024)  # 转换为MB
+                    self._detect_gpu_architecture()
+                    print(f"使用torch检测到NVIDIA GPU: {self.gpu_name}, VRAM: {self.total_vram} MB")
+            except ImportError:
+                # torch未安装，使用其他方法检测
+                pass
+            except Exception as e:
+                print(f"torch GPU检测失败: {e}")
+            
+            # 如果torch检测失败或不是NVIDIA GPU，使用传统方法
+            if self.gpu_vendor == "unknown":
+                if self.os_type == "Windows":
+                    # Windows系统下使用更简单可靠的方法检测GPU
+                    # 先获取所有GPU名称
                     try:
-                        if 'tmp_path' in locals():
-                            os.remove(tmp_path)
-                    except:
-                        pass
+                        # 使用更简单的命令，只获取GPU名称
+                        name_result = subprocess.check_output(['wmic', 'path', 'win32_VideoController', 'get', 'name'], 
+                                                           shell=True, universal_newlines=True, timeout=3)
+                        
+                        # 提取GPU名称
+                        name_lines = [line.strip() for line in name_result.strip().split('\n')[1:] if line.strip()]
+                        
+                        # 获取每个GPU的内存
+                        ram_result = subprocess.check_output(['wmic', 'path', 'win32_VideoController', 'get', 'AdapterRAM'], 
+                                                           shell=True, universal_newlines=True, timeout=3)
+                        
+                        # 提取GPU内存
+                        ram_lines = [line.strip() for line in ram_result.strip().split('\n')[1:] if line.strip()]
+                        
+                        # 匹配GPU名称和内存
+                        gpu_cards = []
+                        for i in range(min(len(name_lines), len(ram_lines))):
+                            gpu_name = name_lines[i]
+                            adapter_ram_str = ram_lines[i]
+                            
+                            try:
+                                adapter_ram = int(adapter_ram_str) if adapter_ram_str else 0
+                                vram_mb = adapter_ram // (1024 * 1024) if adapter_ram > 0 else 2048  # 转换为MB
+                            except ValueError:
+                                vram_mb = 2048  # 默认2GB
+                            
+                            gpu_cards.append({
+                                'name': gpu_name,
+                                'vram_mb': vram_mb
+                            })
+                            print(f"找到GPU: {gpu_name}, VRAM: {vram_mb} MB")
+                        
+                        # 优先选择独立显卡
+                        selected_gpu = None
+                        for gpu in gpu_cards:
+                            if gpu['name']:
+                                gpu_name_lower = gpu['name'].lower()
+                                # 优先选择NVIDIA或AMD
+                                if "nvidia" in gpu_name_lower or "amd" in gpu_name_lower or "radeon" in gpu_name_lower:
+                                    selected_gpu = gpu
+                                    break
+                        
+                        # 如果没有找到独立显卡，使用第一个GPU
+                        if not selected_gpu and gpu_cards:
+                            selected_gpu = gpu_cards[0]
+                        
+                        # 如果找到了GPU，设置GPU信息
+                        if selected_gpu:
+                            self.gpu_info = selected_gpu['name']
+                            self.gpu_name = selected_gpu['name']
+                            
+                            # 检测GPU厂商
+                            if "NVIDIA" in self.gpu_name:
+                                self.gpu_vendor = "NVIDIA"
+                            elif "AMD" in self.gpu_name or "Radeon" in self.gpu_name:
+                                self.gpu_vendor = "AMD"
+                            elif "Intel" in self.gpu_name:
+                                self.gpu_vendor = "Intel"
+                            
+                            # 检测VRAM信息
+                            self.total_vram = selected_gpu['vram_mb']
+                            
+                            # 检测GPU架构
+                            self._detect_gpu_architecture()
+                            print(f"使用wmic检测到 {len(gpu_cards)} 个GPU设备，优先使用: {self.gpu_name}, VRAM: {self.total_vram} MB")
+                    except Exception as e:
+                        # 如果wmic失败，使用更简单的dxdiag方法，只获取基本信息
+                        print(f"wmic检测失败，尝试简化dxdiag: {e}")
+                        try:
+                            # 尝试使用dxdiag获取GPU信息，但不保存到文件
+                            # 使用timeout防止卡死
+                            result = subprocess.check_output(['dxdiag', '/t', 'dxdiag.txt'], shell=True, universal_newlines=True, timeout=3)
+                            
+                            # 直接读取生成的dxdiag.txt文件
+                            try:
+                                with open('dxdiag.txt', 'r', encoding='utf-8', errors='replace') as f:
+                                    dxdiag_content = f.read()
+                                
+                                # 简单提取GPU信息
+                                if 'Card name:' in dxdiag_content:
+                                    card_name_start = dxdiag_content.find('Card name:') + len('Card name:')
+                                    card_name_end = dxdiag_content.find('\n', card_name_start)
+                                    self.gpu_name = dxdiag_content[card_name_start:card_name_end].strip()
+                                    self.gpu_info = self.gpu_name
+                                    
+                                    # 检测GPU厂商
+                                    if "NVIDIA" in self.gpu_name:
+                                        self.gpu_vendor = "NVIDIA"
+                                    elif "AMD" in self.gpu_name or "Radeon" in self.gpu_name:
+                                        self.gpu_vendor = "AMD"
+                                    elif "Intel" in self.gpu_name:
+                                        self.gpu_vendor = "Intel"
+                                    
+                                    # 设置默认VRAM
+                                    self.total_vram = 2048
+                                    self._detect_gpu_architecture()
+                                    print(f"使用dxdiag检测到GPU: {self.gpu_name}")
+                                
+                                # 删除临时文件
+                                os.remove('dxdiag.txt')
+                            except Exception as file_e:
+                                print(f"读取dxdiag.txt失败: {file_e}")
+                                # 尝试删除文件
+                                try:
+                                    os.remove('dxdiag.txt')
+                                except:
+                                    pass
+                        except Exception as dxdiag_e:
+                            # 如果所有Windows检测方法都失败，使用可靠的默认值，但不要模拟上古显卡
+                            print(f"所有Windows GPU检测方法都失败，使用合理默认值: {dxdiag_e}")
+                            self.gpu_info = "现代GPU"
+                            self.gpu_name = "现代GPU"
+                            self.gpu_vendor = "unknown"
+                            self.total_vram = 4096  # 使用更合理的默认值，4GB VRAM
                     
-            elif self.os_type == "Linux":
-                try:
-                    result = subprocess.check_output(['lspci'], shell=True, universal_newlines=True)
-                    # 提取所有GPU信息
-                    gpu_lines = [line for line in result.split('\n') if 'VGA' in line or '3D' in line]
-                    
-                    # 优先选择NVIDIA或AMD的独立显卡
-                    selected_gpu = None
-                    
-                    for line in gpu_lines:
-                        # 排除Intel集成显卡
-                        if 'NVIDIA' in line or 'AMD' in line or 'ATI' in line:
-                            selected_gpu = line
-                            break
-                    
-                    # 如果没有找到独立显卡，使用第一个GPU
-                    if not selected_gpu and gpu_lines:
-                        selected_gpu = gpu_lines[0]
-                    
-                    if selected_gpu:
-                        # 提取GPU信息
-                        if 'NVIDIA' in selected_gpu:
-                            self.gpu_info = "NVIDIA GPU"
-                            self.gpu_name = "NVIDIA GPU"
-                            self.gpu_vendor = "NVIDIA"
-                            self.total_vram = 2048  # 默认NVIDIA低端卡VRAM
-                        elif 'AMD' in selected_gpu or 'ATI' in selected_gpu:
-                            self.gpu_info = "AMD GPU"
-                            self.gpu_name = "AMD GPU"
-                            self.gpu_vendor = "AMD"
-                            self.total_vram = 2048  # 默认AMD低端卡VRAM
-                        elif 'Intel' in selected_gpu:
-                            self.gpu_info = "Intel GPU"
-                            self.gpu_name = "Intel GPU"
-                            self.gpu_vendor = "Intel"
-                            self.total_vram = 1024  # 默认Intel集显VRAM
-                    
-                    print(f"检测到 {len(gpu_lines)} 个GPU设备，优先使用: {self.gpu_name}")
-                    for i, line in enumerate(gpu_lines):
-                        print(f"  GPU {i+1}: {line.strip()}")
-                    
-                except Exception as e:
-                    print(f"Linux GPU检测失败: {e}")
-                    self.gpu_info = "Linux GPU"
-                    self.gpu_name = "Linux GPU"
-                    self.total_vram = 2048
+                elif self.os_type == "Linux":
+                    # Linux系统下使用更可靠的方法检测GPU
+                    try:
+                        # 尝试使用lspci获取GPU信息
+                        result = subprocess.check_output(['lspci', '-vmm'], shell=True, universal_newlines=True, timeout=3)
+                        
+                        # 解析lspci输出
+                        gpu_devices = []
+                        current_device = {}
+                        
+                        for line in result.strip().split('\n'):
+                            line = line.strip()
+                            if not line:
+                                # 空行表示设备结束
+                                if current_device and 'Class' in current_device and ('VGA' in current_device['Class'] or '3D' in current_device['Class']):
+                                    gpu_devices.append(current_device)
+                                current_device = {}
+                                continue
+                            
+                            # 解析键值对
+                            if ':' in line:
+                                key, value = line.split(':', 1)
+                                current_device[key.strip()] = value.strip()
+                        
+                        # 添加最后一个设备
+                        if current_device and 'Class' in current_device and ('VGA' in current_device['Class'] or '3D' in current_device['Class']):
+                            gpu_devices.append(current_device)
+                        
+                        # 优先选择独立显卡
+                        selected_gpu = None
+                        for device in gpu_devices:
+                            if 'Vendor' in device and 'Device' in device:
+                                # 排除Intel集成显卡
+                                if 'NVIDIA' in device['Vendor'] or 'AMD' in device['Vendor'] or 'ATI' in device['Vendor']:
+                                    selected_gpu = device
+                                    break
+                        
+                        # 如果没有找到独立显卡，使用第一个GPU
+                        if not selected_gpu and gpu_devices:
+                            selected_gpu = gpu_devices[0]
+                        
+                        # 如果找到了GPU，设置GPU信息
+                        if selected_gpu:
+                            self.gpu_info = selected_gpu.get('Device', '未知GPU')
+                            self.gpu_name = self.gpu_info
+                            
+                            # 检测GPU厂商
+                            if 'NVIDIA' in selected_gpu.get('Vendor', ''):
+                                self.gpu_vendor = "NVIDIA"
+                            elif 'AMD' in selected_gpu.get('Vendor', '') or 'ATI' in selected_gpu.get('Vendor', ''):
+                                self.gpu_vendor = "AMD"
+                            elif 'Intel' in selected_gpu.get('Vendor', ''):
+                                self.gpu_vendor = "Intel"
+                            
+                            # 尝试获取VRAM信息
+                            try:
+                                # 使用lshw获取更详细的硬件信息
+                                lshw_result = subprocess.check_output(['lshw', '-C', 'display'], shell=True, universal_newlines=True, timeout=3)
+                                vram_match = re.search(r'size:\s*(\d+)\s*MiB', lshw_result, re.IGNORECASE)
+                                if vram_match:
+                                    self.total_vram = int(vram_match.group(1))
+                            except:
+                                # 如果lshw失败，使用默认值
+                                self.total_vram = 4096  # 使用更合理的默认值
+                            
+                            self._detect_gpu_architecture()
+                            print(f"使用lspci检测到 {len(gpu_devices)} 个GPU设备，优先使用: {self.gpu_name}")
+                    except Exception as e:
+                        # 如果Linux检测失败，使用可靠的默认值
+                        print(f"Linux GPU检测失败，使用可靠默认值: {e}")
+                        self.gpu_info = "Linux现代GPU"
+                        self.gpu_name = "Linux现代GPU"
+                        self.total_vram = 4096  # 使用更合理的默认值
+            
+            # 确保GPU名称有值
+            if not self.gpu_name or self.gpu_name == "未知GPU":
+                self.gpu_name = "现代GPU"
+                self.gpu_info = self.gpu_name
+                self.total_vram = 4096  # 使用更合理的默认值
             
             # 检测是否为低端GPU
             self._detect_low_end_gpu()
         except Exception as e:
             print(f"GPU检测错误: {e}")
-            # 即使检测失败也设置默认值
-            self.gpu_info = "默认GPU"
-            self.gpu_name = "默认GPU"
-            self.total_vram = 2048
+            # 即使检测失败也设置合理的默认值
+            self.gpu_info = "现代GPU"
+            self.gpu_name = "现代GPU"
+            self.total_vram = 4096  # 使用更合理的默认值
             self._detect_low_end_gpu()
     
     def _detect_gpu_architecture(self):
@@ -455,8 +488,16 @@ class Platform:
             self.render_features["geometry_shaders"] = max_geom_verts > 0
             
             # 检测计算着色器支持
-            compute_workgroup = glGetIntegerv(GL_MAX_COMPUTE_WORK_GROUP_SIZE, size=3)
-            self.render_features["compute_shaders"] = compute_workgroup[0] > 0
+            try:
+                # 初始化一个数组来存储结果
+                import ctypes
+                compute_workgroup = ctypes.c_int * 3
+                compute_workgroup_size = compute_workgroup()
+                glGetIntegerv(GL_MAX_COMPUTE_WORK_GROUP_SIZE, compute_workgroup_size)
+                self.render_features["compute_shaders"] = compute_workgroup_size[0] > 0
+            except Exception as e:
+                self.render_features["compute_shaders"] = False
+                self.logger.debug(f"检测计算着色器支持失败: {e}")
             
             # 检测光线追踪支持（通过OpenGL扩展）
             from OpenGL.GL import GL_EXTENSIONS
@@ -534,218 +575,21 @@ class Platform:
         
         # 检测GPU信息
         self._detect_gpu()
-        
+
         # 检测可用的图形API
         self._detect_graphics_api()
-        
+
         # 检测系统内存
         self._detect_system_memory()
-        
+
         # 检测CPU信息
         self._detect_cpu()
-        
-        # 创建窗口和渲染上下文
-        if self.has_graphics:
-            try:
-                print("创建图形窗口...")
-                # 初始化GLUT
-                # 将sys.argv转换为bytes类型，适配GLUT要求
-                glut_argv = [arg.encode('utf-8') for arg in sys.argv]
-                glutInit(glut_argv)
-                glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)
-                glutInitWindowSize(self.width, self.height)
-                glutCreateWindow(b"Low End GPU Rendering Engine")
-                
-                # 设置基本渲染状态
-                glEnable(GL_DEPTH_TEST)
-                glEnable(GL_CULL_FACE)
-                glCullFace(GL_BACK)
-                glFrontFace(GL_CCW)
-                
-                # 设置清除颜色
-                glClearColor(0.1, 0.1, 0.1, 1.0)
-                
-                # 设置视口
-                glViewport(0, 0, self.width, self.height)
-                
-                # 设置投影矩阵
-                glMatrixMode(GL_PROJECTION)
-                glLoadIdentity()
-                glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0)
-                
-                # 设置模型视图矩阵
-                glMatrixMode(GL_MODELVIEW)
-                glLoadIdentity()
-                
-                # 检测硬件支持的特性（在OpenGL上下文创建之后）
-                self._detect_hardware_features()
-                
-                # 检测渲染特性（在OpenGL上下文创建之后）
-                self._detect_render_features()
-                
-                # 注册窗口事件处理
-                def on_display():
-                    # 这个函数会在GLUT主循环中自动调用
-                    pass
-                
-                def on_resize(w, h):
-                    self.width = w
-                    self.height = h
-                    glViewport(0, 0, w, h)
-                    glMatrixMode(GL_PROJECTION)
-                    glLoadIdentity()
-                    glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0)
-                    
-                    # 通知主窗口大小变化
-                    try:
-                        # 直接使用engine实例，避免导入错误
-                        if hasattr(self, 'engine') and hasattr(self.engine, 'main_window'):
-                            self.engine.main_window.handle_resize(w, h)
-                    except:
-                        pass
-                
-                def on_keyboard(key, x, y):
-                    if key == b'\x1b':  # ESC键
-                        self.is_window_open_flag = False
-                        glutLeaveMainLoop()
-                    
-                    # 检查UI是否活跃
-                    ui_active = False
-                    if hasattr(self, 'ui_manager') and self.ui_manager:
-                        ui_active = self.ui_manager.is_mouse_over_controls()
-                    
-                    # 设置相机控制器的UI活跃状态
-                    if hasattr(self, 'camera_controller') and self.camera_controller:
-                        self.camera_controller.set_ui_active(ui_active)
-                    
-                    # 传递键盘事件给UI管理器
-                    if hasattr(self, 'ui_manager') and self.ui_manager:
-                        ui_handled = self.ui_manager.handle_key_down(ord(key))
-                        if not ui_handled and hasattr(self, 'camera_controller') and self.camera_controller:
-                            # 如果UI没有处理事件，传递给相机控制器
-                            self.camera_controller.handle_key_down(ord(key))
-                
-                def on_keyboard_up(key, x, y):
-                    # 传递键盘释放事件给UI管理器
-                    if hasattr(self, 'ui_manager') and self.ui_manager:
-                        self.ui_manager.handle_key_up(ord(key))
-                
-                def on_mouse_motion(x, y):
-                    # 转换y坐标，GLUT的原点在左上角，我们需要转换为左下角
-                    y = self.height - y
-                    
-                    # 检查UI是否活跃
-                    ui_active = False
-                    if hasattr(self, 'ui_manager') and self.ui_manager:
-                        ui_active = self.ui_manager.is_mouse_over_controls()
-                    
-                    # 设置相机控制器的UI活跃状态
-                    if hasattr(self, 'camera_controller') and self.camera_controller:
-                        self.camera_controller.set_ui_active(ui_active)
-                    
-                    # 传递鼠标移动事件给UI管理器
-                    if hasattr(self, 'ui_manager') and self.ui_manager:
-                        ui_handled = self.ui_manager.handle_mouse_move(x, y)
-                        if not ui_handled and hasattr(self, 'camera_controller') and self.camera_controller:
-                            # 如果UI没有处理事件，传递给相机控制器
-                            self.camera_controller.handle_mouse_move(x, y)
-                
-                def on_mouse_passive_motion(x, y):
-                    # 转换y坐标
-                    y = self.height - y
-                    # 传递鼠标被动移动事件给UI管理器
-                    if hasattr(self, 'ui_manager') and self.ui_manager:
-                        self.ui_manager.handle_mouse_move(x, y)
-                
-                def on_mouse_click(button, state, x, y):
-                    # 转换y坐标
-                    y = self.height - y
-                    
-                    # 检查UI是否活跃
-                    ui_active = False
-                    if hasattr(self, 'ui_manager') and self.ui_manager:
-                        ui_active = self.ui_manager.is_mouse_over_controls()
-                    
-                    # 设置相机控制器的UI活跃状态
-                    if hasattr(self, 'camera_controller') and self.camera_controller:
-                        self.camera_controller.set_ui_active(ui_active)
-                    
-                    # 传递鼠标点击事件给UI管理器
-                    if hasattr(self, 'ui_manager') and self.ui_manager:
-                        ui_handled = False
-                        if state == GLUT_DOWN:
-                            ui_handled = self.ui_manager.handle_mouse_down(button)
-                        else:
-                            ui_handled = self.ui_manager.handle_mouse_up(button)
-                        
-                        if not ui_handled:
-                            # 如果UI没有处理事件，传递给相机控制器
-                            if hasattr(self, 'camera_controller') and self.camera_controller:
-                                if state == GLUT_DOWN:
-                                    self.camera_controller.handle_mouse_down(button, x, y)
-                                else:
-                                    self.camera_controller.handle_mouse_up(button, x, y)
-                            
-                            # 如果是左键点击，尝试选择场景节点
-                            if button == GLUT_LEFT_BUTTON and state == GLUT_DOWN:
-                                # 获取引擎实例
-                                from .. import get_engine
-                                engine = get_engine()
-                                if engine and engine.scene_manager:
-                                    # 调用场景管理器的pick_node方法选择节点
-                                    picked_node = engine.scene_manager.pick_node(x, y)
-                                    if picked_node:
-                                        print(f"选中节点: {picked_node.name}")
-                                        # 设置变换操纵器的选中节点
-                                        if hasattr(engine, 'transform_manipulator'):
-                                            engine.transform_manipulator.set_selected_node(picked_node)
-                                        # 设置属性面板的选中节点
-                                        if hasattr(engine, 'main_window'):
-                                            property_panel = engine.main_window.get_property_panel()
-                                            if property_panel:
-                                                property_panel.set_selected_object(picked_node)
-                
-                def on_mouse_wheel(button, direction, x, y):
-                    # 转换y坐标
-                    y = self.height - y
-                    
-                    # 检查UI是否活跃
-                    ui_active = False
-                    if hasattr(self, 'ui_manager') and self.ui_manager:
-                        ui_active = self.ui_manager.is_mouse_over_controls()
-                    
-                    # 设置相机控制器的UI活跃状态
-                    if hasattr(self, 'camera_controller') and self.camera_controller:
-                        self.camera_controller.set_ui_active(ui_active)
-                    
-                    # 传递鼠标滚轮事件给UI管理器和相机控制器
-                    if hasattr(self, 'ui_manager') and self.ui_manager:
-                        ui_handled = self.ui_manager.handle_mouse_wheel(direction)
-                        if not ui_handled and hasattr(self, 'camera_controller') and self.camera_controller:
-                            # 如果UI没有处理事件，传递给相机控制器
-                            self.camera_controller.handle_mouse_wheel(direction)
-                
-                def on_close():
-                    self.is_window_open_flag = False
-                    return True
-                
-                # 注册回调函数
-                glutDisplayFunc(on_display)
-                glutReshapeFunc(on_resize)
-                glutKeyboardFunc(on_keyboard)
-                glutKeyboardUpFunc(on_keyboard_up)
-                glutMotionFunc(on_mouse_motion)
-                glutPassiveMotionFunc(on_mouse_passive_motion)
-                glutMouseFunc(on_mouse_click)
-                # 注册鼠标滚轮事件
-                glutMouseWheelFunc(on_mouse_wheel)
-                
-                self.window_created = True
-                print(f"图形窗口创建成功: {self.width}x{self.height}")
-            except Exception as e:
-                print(f"创建图形窗口失败: {e}")
-                self.has_graphics = False
-        
+
+        # 注意：窗口创建现在由Tkinter UI管理，不再在Platform层创建
+        # OpenGL上下文由pyopengltk在Tkinter中管理
+        self.window_created = False  # 由Tkinter管理
+        print("窗口管理已移交给Tkinter UI")
+
         print(f"操作系统: {self.os_type}")
         print(f"GPU信息: {self.gpu_info}")
         print(f"GPU名称: {self.gpu_name}")
@@ -839,7 +683,7 @@ class Platform:
                 glEnable(GL_DEPTH_TEST)
             else:
                 glDisable(GL_DEPTH_TEST)
-        print(f"启用深度测试: {enable}")
+
     
     def enable_cull_face(self, enable):
         """
@@ -853,7 +697,7 @@ class Platform:
                 glEnable(GL_CULL_FACE)
             else:
                 glDisable(GL_CULL_FACE)
-        print(f"启用背面剔除: {enable}")
+
     
     def set_depth_func(self, func):
         """
@@ -875,7 +719,7 @@ class Platform:
             }
             if func in depth_funcs:
                 glDepthFunc(depth_funcs[func])
-        print(f"设置深度测试函数: {func}")
+
     
     def enable_polygon_offset(self, enable):
         """
@@ -889,7 +733,7 @@ class Platform:
                 glEnable(GL_POLYGON_OFFSET_FILL)
             else:
                 glDisable(GL_POLYGON_OFFSET_FILL)
-        print(f"启用多边形偏移: {enable}")
+
     
     def set_blend_func(self, src, dst):
         """
@@ -911,7 +755,7 @@ class Platform:
             src_factor = blend_factors.get(src, GL_ONE)
             dst_factor = blend_factors.get(dst, GL_ZERO)
             glBlendFunc(src_factor, dst_factor)
-        print(f"设置混合函数: {src}, {dst}")
+
     
     def create_shader_program(self, vertex_code, fragment_code):
         """
@@ -946,19 +790,15 @@ class Platform:
                 link_status = glGetProgramiv(program, GL_LINK_STATUS)
                 if link_status != GL_TRUE:
                     info_log = glGetProgramInfoLog(program)
-                    print(f"着色器程序链接失败: {info_log}")
                     return None
                 
                 # 删除着色器对象
                 glDeleteShader(vertex_shader)
                 glDeleteShader(fragment_shader)
                 
-                print("创建着色器程序成功")
                 return program
             except Exception as e:
-                print(f"创建着色器程序失败: {e}")
                 return None
-        print("创建着色器程序")
         return 1  # 返回一个假的着色器程序ID
     
     def clear(self, color, depth=1.0, stencil=0):
@@ -975,7 +815,7 @@ class Platform:
             glClearDepth(depth)
             glClearStencil(stencil)
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)
-        print(f"清除缓冲区，颜色: {color}, 深度: {depth}, 模板: {stencil}")
+
     
     def set_viewport(self, x, y, width, height):
         """
@@ -989,12 +829,12 @@ class Platform:
         """
         if self.has_graphics:
             glViewport(x, y, width, height)
-        print(f"设置视口: {x}, {y}, {width}, {height}")
+
     
     def swap_buffers(self):
         """
-        交换前后缓冲区
+        交换前后缓冲区（由pyopengltk自动处理）
         """
-        if self.has_graphics and self.window_created:
-            glutSwapBuffers()
-        print("交换缓冲区")
+        # pyopengltk的OpenGLFrame自动处理缓冲区交换
+        # 无需手动调用
+        pass

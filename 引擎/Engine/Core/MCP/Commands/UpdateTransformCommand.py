@@ -5,7 +5,7 @@ MCP架构 - 更新变换命令
 """
 
 from Engine.Core.MCP.Commands.Command import Command
-from Engine.Math.Math import Vector3, Quaternion, Matrix4x4
+from Engine.Math import Vector3, Quaternion, Matrix4x4
 
 class UpdateTransformCommand(Command):
     """更新变换命令

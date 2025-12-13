@@ -17,7 +17,10 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 cython_extensions = [
     Extension(
         name="CythonMath",  # 生成的扩展模块名称
-        sources=["CythonMath.pyx"],  # 源文件
+        sources=[
+            "CythonMath.pyx",  # Cython源文件
+            "asm_math.c",  # 汇编优化的C包装文件
+        ],
         include_dirs=[current_dir],  # 包含目录
         # 编译优化选项
         extra_compile_args=[

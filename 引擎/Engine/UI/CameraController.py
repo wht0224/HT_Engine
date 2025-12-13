@@ -301,6 +301,107 @@ class CameraController:
         # 可以在这里添加按键释放时的逻辑，比如停止持续移动等
         return False
     
+    def orbit(self, deltaX, deltaY):
+        """HTML UI调用的轨道相机控制方法
+        
+        Args:
+            deltaX: X方向的旋转增量
+            deltaY: Y方向的旋转增量
+        """
+        # 如果当前不是轨道模式，切换到轨道模式
+        if self.mode != self.Mode.ORBIT:
+            self.set_mode(self.Mode.ORBIT)
+        
+        # 更新轨道相机参数
+        self.orbit_yaw += deltaX * self.rotate_speed
+        self.orbit_pitch -= deltaY * self.rotate_speed
+        
+        # 限制pitch范围，避免相机翻转
+        self.orbit_pitch = self._clamp_pitch(self.orbit_pitch)
+        
+        # 更新轨道相机
+        self._update_orbit_camera()
+    
+    def pan(self, deltaX, deltaY):
+        """HTML UI调用的相机平移方法
+        
+        Args:
+            deltaX: X方向的平移增量
+            deltaY: Y方向的平移增量
+        """
+        if self.mode != self.Mode.ORBIT:
+            self.set_mode(self.Mode.ORBIT)
+        
+        move_speed = self._get_pan_speed()
+        
+        # 计算平移方向
+        camera_right = self.camera.get_right()
+        camera_up = self.camera.get_up()
+        
+        # 平移目标点
+        self.orbit_target += camera_right * (-deltaX * move_speed) + camera_up * (deltaY * move_speed)
+        
+        # 更新轨道相机
+        self._update_orbit_camera()
+    
+    def zoom(self, delta):
+        """HTML UI调用的相机缩放方法
+        
+        Args:
+            delta: 缩放增量，正数表示放大，负数表示缩小
+        """
+        if self.mode == self.Mode.ORBIT:
+            # 轨道相机缩放
+            self.orbit_distance -= delta * self.zoom_speed
+            self.orbit_distance = max(self.MIN_ORBIT_DISTANCE, self.orbit_distance)  # 限制最小距离
+            self._update_orbit_camera()
+        else:
+            # 其他相机模式下的缩放
+            self.camera.move_forward(delta * self.zoom_speed)
+    
+    def move(self, direction):
+        """HTML UI调用的相机方向移动方法
+        
+        Args:
+            direction: 移动方向，如 'forward', 'backward', 'left', 'right', 'up', 'down'
+        """
+        if direction == 'forward':
+            self.camera.move_forward(self.move_speed)
+        elif direction == 'backward':
+            self.camera.move_forward(-self.move_speed)
+        elif direction == 'left':
+            self.camera.move_right(-self.move_speed)
+        elif direction == 'right':
+            self.camera.move_right(self.move_speed)
+        elif direction == 'up':
+            self.camera.move_up(self.move_speed)
+        elif direction == 'down':
+            self.camera.move_up(-self.move_speed)
+    
+    def set_top_view(self):
+        """设置顶视图"""
+        self.orbit_target = Vector3(0, 0, 0)
+        self.orbit_yaw = 0
+        self.orbit_pitch = math.pi/2
+        self.orbit_distance = 10
+        self.set_mode(self.Mode.ORBIT)
+    
+    def set_front_view(self):
+        """设置前视图"""
+        self.orbit_target = Vector3(0, 0, 0)
+        self.orbit_yaw = math.pi
+        self.orbit_pitch = 0
+        self.orbit_distance = 10
+        self.set_mode(self.Mode.ORBIT)
+    
+    def set_right_view(self):
+        """设置右视图"""
+        self.orbit_target = Vector3(0, 0, 0)
+        self.orbit_yaw = math.pi/2
+        self.orbit_pitch = 0
+        self.orbit_distance = 10
+        self.set_mode(self.Mode.ORBIT)
+    
     def _update_camera_from_mode(self):
         """根据当前模式更新相机"""
         if self.mode == self.Mode.ORBIT:

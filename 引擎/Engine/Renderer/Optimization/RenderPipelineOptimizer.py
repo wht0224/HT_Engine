@@ -68,9 +68,9 @@ class RenderPipelineOptimizer:
         quality_str = self.recommended_settings["quality_level"]
         quality = RenderQuality(quality_str)
         
-        if self.renderer.render_quality != quality:
-            self.logger.info(f"调整渲染质量: {self.renderer.render_quality.value} -> {quality.value}")
-            self.renderer.render_quality = quality
+        if self.renderer.quality != quality:
+            self.logger.info(f"调整渲染质量: {self.renderer.quality.value} -> {quality.value}")
+            self.renderer.quality = quality
     
     def _adjust_pipeline_parameters(self):
         """
@@ -106,77 +106,77 @@ class RenderPipelineOptimizer:
         # 调整纹理分辨率和压缩格式
         if texture_quality == "low":
             # 低纹理质量：使用较低分辨率和高压缩
-            self.renderer.texture_resolution_scale = 0.5
-            self.renderer.texture_compression = "bc7"
+            self.renderer.tex_res_scale = 0.5
+            self.renderer.tex_compression = "bc7"
         elif texture_quality == "medium":
             # 中等纹理质量：使用正常分辨率和中等压缩
-            self.renderer.texture_resolution_scale = 1.0
-            self.renderer.texture_compression = "bc7"
+            self.renderer.tex_res_scale = 1.0
+            self.renderer.tex_compression = "bc7"
         elif texture_quality == "high":
             # 高纹理质量：使用高分辨率和低压缩
-            self.renderer.texture_resolution_scale = 1.5
-            self.renderer.texture_compression = "bc7"
+            self.renderer.tex_res_scale = 1.5
+            self.renderer.tex_compression = "bc7"
         else:  # ultra
             # 超高纹理质量：使用最高分辨率和无损压缩
-            self.renderer.texture_resolution_scale = 2.0
-            self.renderer.texture_compression = "none"
+            self.renderer.tex_res_scale = 2.0
+            self.renderer.tex_compression = "none"
         
-        self.logger.info(f"调整纹理质量: {texture_quality}, 分辨率缩放={self.renderer.texture_resolution_scale}, "
-                       f"压缩格式={self.renderer.texture_compression}")
+        self.logger.info(f"调整纹理质量: {texture_quality}, 分辨率缩放={self.renderer.tex_res_scale}, "
+                       f"压缩格式={self.renderer.tex_compression}")
     
     def _adjust_render_features(self):
         """
         调整渲染特性
         """
         # 调整SSR（屏幕空间反射）
-        self.renderer.enable_ssr = self.recommended_settings["enable_ssr"]
+        self.renderer.ssr_enabled = self.recommended_settings["enable_ssr"]
         
         # 调整体积光照
-        self.renderer.enable_volumetric_lighting = self.recommended_settings["enable_volumetric_lighting"]
+        self.renderer.volumetric_lighting_enabled = self.recommended_settings["enable_volumetric_lighting"]
         
         # 调整环境光遮蔽
-        self.renderer.enable_ao = self.recommended_settings["enable_ao"]
+        self.renderer.ao_enabled = self.recommended_settings["enable_ao"]
         
         # 调整其他渲染特性
         self._adjust_other_features()
         
-        self.logger.info(f"调整渲染特性: SSR={self.renderer.enable_ssr}, "
-                       f"体积光照={self.renderer.enable_volumetric_lighting}, "
-                       f"环境光遮蔽={self.renderer.enable_ao}")
+        self.logger.info(f"调整渲染特性: SSR={self.renderer.ssr_enabled}, "
+                       f"体积光照={self.renderer.volumetric_lighting_enabled}, "
+                       f"环境光遮蔽={self.renderer.ao_enabled}")
     
     def _adjust_other_features(self):
         """
         调整其他渲染特性
         """
-        hardware_info = self.renderer.hardware_info
-        render_features = hardware_info["render_features"]
+        hardware_info = self.renderer.hw_info
+        render_features = hardware_info.get("render_features", {})
         
         # 根据GPU支持情况调整渲染特性
         
         # 曲面细分支持
-        self.renderer.enable_tessellation = render_features.get("tessellation", False)
+        self.renderer.tessellation_enabled = render_features.get("tessellation", False)
         
         # 几何着色器支持
-        self.renderer.enable_geometry_shaders = render_features.get("geometry_shaders", False)
+        self.renderer.geometry_shaders_enabled = render_features.get("geometry_shaders", False)
         
         # 计算着色器支持
-        self.renderer.enable_compute_shaders = render_features.get("compute_shaders", False)
+        self.renderer.compute_shaders_enabled = render_features.get("compute_shaders", False)
         
         # 光线追踪支持
-        self.renderer.enable_ray_tracing = render_features.get("ray_tracing", False)
+        self.renderer.ray_tracing_enabled = render_features.get("ray_tracing", False)
         
         # 网格着色器支持
-        self.renderer.enable_mesh_shaders = render_features.get("mesh_shaders", False)
+        self.renderer.mesh_shaders_enabled = render_features.get("mesh_shaders", False)
         
         # 可变速率着色支持
-        self.renderer.enable_variable_rate_shading = render_features.get("variable_rate_shading", False)
+        self.renderer.variable_rate_shading_enabled = render_features.get("variable_rate_shading", False)
     
     def _apply_architecture_specific_optimizations(self):
         """
         应用架构特定优化
         """
-        architecture = self.renderer.hardware_info["gpu_architecture"]
-        vendor = self.renderer.hardware_info["gpu_vendor"]
+        architecture = self.renderer.hw_info["gpu_architecture"]
+        vendor = self.renderer.hw_info["gpu_vendor"]
         
         self.logger.info(f"应用架构特定优化: {vendor} {architecture}")
         
@@ -201,37 +201,37 @@ class RenderPipelineOptimizer:
         """
         # Maxwell架构优化
         if architecture == "maxwell":
-            self.renderer.enable_batch_rendering = True
-            self.renderer.enable_instancing = True
+            self.renderer.batch_enabled = True
+            self.renderer.instancing_enabled = True
             self.renderer.max_instanced_draws = 1024
-            self.renderer.shadow_map_resolution = min(self.renderer.shadow_map_resolution, 1024)
+            self.renderer.shadow_map_res = min(self.renderer.shadow_map_res, 1024)
         
         # Pascal架构优化
         elif architecture == "pascal":
-            self.renderer.enable_batch_rendering = True
-            self.renderer.enable_instancing = True
+            self.renderer.batch_enabled = True
+            self.renderer.instancing_enabled = True
             self.renderer.max_instanced_draws = 2048
-            self.renderer.shadow_map_resolution = min(self.renderer.shadow_map_resolution, 2048)
+            self.renderer.shadow_map_res = min(self.renderer.shadow_map_res, 2048)
         
         # Turing架构优化
         elif architecture == "turing":
-            self.renderer.enable_rt_cores = True
-            self.renderer.enable_tensor_cores = True
-            self.renderer.enable_dlss = True
+            self.renderer.rt_cores_enabled = True
+            self.renderer.tensor_cores_enabled = True
+            self.renderer.dlss_enabled = True
         
         # Ampere架构优化
         elif architecture == "ampere":
-            self.renderer.enable_rt_cores = True
-            self.renderer.enable_tensor_cores = True
-            self.renderer.enable_dlss = True
+            self.renderer.rt_cores_enabled = True
+            self.renderer.tensor_cores_enabled = True
+            self.renderer.dlss_enabled = True
             self.renderer.max_draw_calls = min(self.renderer.max_draw_calls, 3000)
         
         # Ada架构优化
         elif architecture == "ada":
-            self.renderer.enable_rt_cores = True
-            self.renderer.enable_tensor_cores = True
-            self.renderer.enable_dlss = True
-            self.renderer.enable_frame_gen = True
+            self.renderer.rt_cores_enabled = True
+            self.renderer.tensor_cores_enabled = True
+            self.renderer.dlss_enabled = True
+            self.renderer.frame_gen_enabled = True
     
     def _apply_amd_optimizations(self, architecture):
         """
@@ -242,31 +242,31 @@ class RenderPipelineOptimizer:
         """
         # GCN架构优化
         if architecture == "gcn":
-            self.renderer.enable_batch_rendering = True
-            self.renderer.enable_instancing = False  # GCN架构实例化性能较差
+            self.renderer.batch_enabled = True
+            self.renderer.instancing_enabled = False  # GCN架构实例化性能较差
             self.renderer.max_draw_calls = min(self.renderer.max_draw_calls, 1000)
-            self.renderer.shadow_map_resolution = min(self.renderer.shadow_map_resolution, 1024)
+            self.renderer.shadow_map_res = min(self.renderer.shadow_map_res, 1024)
         
         # GCN5架构优化
         elif architecture == "gcn5":
-            self.renderer.enable_batch_rendering = True
-            self.renderer.enable_instancing = True
+            self.renderer.batch_enabled = True
+            self.renderer.instancing_enabled = True
             self.renderer.max_instanced_draws = 1024
         
         # RDNA1架构优化
         elif architecture == "rdna1":
-            self.renderer.enable_batch_rendering = True
-            self.renderer.enable_instancing = True
+            self.renderer.batch_enabled = True
+            self.renderer.instancing_enabled = True
             self.renderer.max_instanced_draws = 2048
-            self.renderer.enable_amd_fidelityfx = True
+            self.renderer.fidelityfx_enabled = True
         
         # RDNA2架构优化
         elif architecture == "rdna2":
-            self.renderer.enable_batch_rendering = True
-            self.renderer.enable_instancing = True
+            self.renderer.batch_enabled = True
+            self.renderer.instancing_enabled = True
             self.renderer.max_instanced_draws = 4096
-            self.renderer.enable_amd_fidelityfx = True
-            self.renderer.enable_ray_tracing = True
+            self.renderer.fidelityfx_enabled = True
+            self.renderer.ray_tracing_enabled = True
     
     def _apply_intel_optimizations(self, architecture):
         """
@@ -277,27 +277,27 @@ class RenderPipelineOptimizer:
         """
         # Intel HD架构优化
         if architecture == "intel_hd" or architecture == "intel_hd_500" or architecture == "intel_hd_600":
-            self.renderer.enable_batch_rendering = True
-            self.renderer.enable_instancing = False
+            self.renderer.batch_enabled = True
+            self.renderer.instancing_enabled = False
             self.renderer.max_draw_calls = min(self.renderer.max_draw_calls, 500)
-            self.renderer.shadow_map_resolution = min(self.renderer.shadow_map_resolution, 512)
-            self.renderer.enable_ao = False
-            self.renderer.enable_ssr = False
+            self.renderer.shadow_map_res = min(self.renderer.shadow_map_res, 512)
+            self.renderer.ao_enabled = False
+            self.renderer.ssr_enabled = False
         
         # Intel Iris架构优化
         elif architecture == "intel_iris" or architecture == "intel_iris_xe":
-            self.renderer.enable_batch_rendering = True
-            self.renderer.enable_instancing = True
+            self.renderer.batch_enabled = True
+            self.renderer.instancing_enabled = True
             self.renderer.max_instanced_draws = 1024
-            self.renderer.shadow_map_resolution = min(self.renderer.shadow_map_resolution, 1024)
+            self.renderer.shadow_map_res = min(self.renderer.shadow_map_res, 1024)
         
         # Intel Arc架构优化
         elif architecture == "intel_arc":
-            self.renderer.enable_batch_rendering = True
-            self.renderer.enable_instancing = True
+            self.renderer.batch_enabled = True
+            self.renderer.instancing_enabled = True
             self.renderer.max_instanced_draws = 2048
-            self.renderer.enable_ray_tracing = True
-            self.renderer.enable_intel_xess = True
+            self.renderer.ray_tracing_enabled = True
+            self.renderer.xess_enabled = True
     
     def update(self, delta_time):
         """
@@ -318,17 +318,17 @@ class RenderPipelineOptimizer:
         """
         return {
             "render_mode": self.renderer.render_mode.value,
-            "render_quality": self.renderer.render_quality.value,
+            "render_quality": self.renderer.quality.value,
             "max_draw_calls": self.renderer.max_draw_calls,
             "max_visible_lights": self.renderer.max_visible_lights,
             "shadow_map_resolution": self.renderer.shadow_map_resolution,
             "texture_quality": self.recommended_settings["texture_quality"],
-            "texture_resolution_scale": self.renderer.texture_resolution_scale,
-            "enable_ssr": self.renderer.enable_ssr,
-            "enable_volumetric_lighting": self.renderer.enable_volumetric_lighting,
-            "enable_ao": self.renderer.enable_ao,
-            "enable_tessellation": self.renderer.enable_tessellation,
-            "enable_geometry_shaders": self.renderer.enable_geometry_shaders,
-            "enable_compute_shaders": self.renderer.enable_compute_shaders,
-            "enable_ray_tracing": self.renderer.enable_ray_tracing
+            "texture_resolution_scale": self.renderer.tex_res_scale,
+            "enable_ssr": self.renderer.ssr_enabled,
+            "enable_volumetric_lighting": self.renderer.volumetric_lighting_enabled,
+            "enable_ao": self.renderer.ao_enabled,
+            "enable_tessellation": self.renderer.tessellation_enabled,
+            "enable_geometry_shaders": self.renderer.geometry_shaders_enabled,
+            "enable_compute_shaders": self.renderer.compute_shaders_enabled,
+            "enable_ray_tracing": self.renderer.ray_tracing_enabled
         }

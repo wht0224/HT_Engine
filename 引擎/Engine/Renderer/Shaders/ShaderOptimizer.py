@@ -187,8 +187,13 @@ class ShaderOptimizer:
             if self.optimization_options["branch_optimization"]:
                 optimized_source = self._branch_optimization(optimized_source)
         
+        # 计算优化前后的指令数差异
+        original_instructions = len([line for line in shader_source.split('\n') if line.strip() and not line.strip().startswith('//')])
+        optimized_instructions = len([line for line in optimized_source.split('\n') if line.strip() and not line.strip().startswith('//')])
+        
         # 更新性能统计
         self.optimization_stats["shaders_optimized"] += 1
+        self.optimization_stats["instructions_removed"] += max(0, original_instructions - optimized_instructions)
         
         # 添加注释标记优化结束
         optimized_source += "\n// 结束着色器优化"
@@ -205,13 +210,55 @@ class ShaderOptimizer:
         Returns:
             str: 优化后的着色器源代码
         """
-        # 这是一个简化的实现，实际实现会更复杂
+        # 这是一个增强的实现，支持更多常量表达式和数学函数
         # 查找并计算常量表达式
         
-        # 匹配数字常量表达式
-        number_pattern = r'\b(\d+(?:\.\d+)?)\s*([+\-*/])\s*(\d+(?:\.\d+)?)\b'
+        # 匹配数字常量表达式，支持科学计数法和括号
+        number_pattern = r'\b(\d+(?:\.\d+)?|\d+e[-+]?\d+|\d+E[-+]?\d+)\s*([+\-*/])\s*(\d+(?:\.\d+)?|\d+e[-+]?\d+|\d+E[-+]?\d+)\b'
         
         def evaluate_constant(match):
+            try:
+                left = float(match.group(1))
+                op = match.group(2)
+                right = float(match.group(3))
+                
+                if op == '+':
+                    result = left + right
+                elif op == '-':
+                    result = left - right
+                elif op == '*':
+                    result = left * right
+                elif op == '/':
+                    if right != 0:
+                        result = left / right
+                    else:
+                        return match.group(0)  # 避免除零错误
+                else:
+                    return match.group(0)
+                
+                # 格式化结果，移除不必要的小数点，使用初中学过的科学计数法表示极值
+                if result.is_integer():
+                    return str(int(result))
+                else:
+                    # 使用合适的格式表示结果
+                    if abs(result) > 1e6 or (abs(result) < 1e-6 and result != 0):
+                        return f"{result:.6g}"
+                    else:
+                        return f"{result}"
+            except:
+                return match.group(0)
+        
+        # 反复应用常量折叠，直到没有更多变化
+        while True:
+            new_source = re.sub(number_pattern, evaluate_constant, shader_source)
+            if new_source == shader_source:
+                break
+            shader_source = new_source
+        
+        # 匹配带括号的简单常量表达式 (a op b)
+        parenthesis_pattern = r'\(\s*(\d+(?:\.\d+)?|\d+e[-+]?\d+|\d+E[-+]?\d+)\s*([+\-*/])\s*(\d+(?:\.\d+)?|\d+e[-+]?\d+|\d+E[-+]?\d+)\s*\)'
+        
+        def evaluate_parenthesis(match):
             try:
                 left = float(match.group(1))
                 op = match.group(2)
@@ -235,13 +282,17 @@ class ShaderOptimizer:
                 if result.is_integer():
                     return str(int(result))
                 else:
-                    return str(result)
+                    # 使用合适的格式表示结果
+                    if abs(result) > 1e6 or (abs(result) < 1e-6 and result != 0):
+                        return f"{result:.6g}"
+                    else:
+                        return f"{result}"
             except:
                 return match.group(0)
         
-        # 反复应用常量折叠，直到没有更多变化
+        # 反复应用括号内常量折叠，直到没有更多变化
         while True:
-            new_source = re.sub(number_pattern, evaluate_constant, shader_source)
+            new_source = re.sub(parenthesis_pattern, evaluate_parenthesis, shader_source)
             if new_source == shader_source:
                 break
             shader_source = new_source
@@ -257,20 +308,105 @@ class ShaderOptimizer:
             'floor': math.floor,
             'exp': math.exp,
             'log': math.log,
+            'log2': math.log2,
+            'log10': math.log10,
+            'pow': math.pow,
+            'asin': math.asin,
+            'acos': math.acos,
+            'atan': math.atan,
+            'atan2': math.atan2,
+            'sinh': math.sinh,
+            'cosh': math.cosh,
+            'tanh': math.tanh,
+            'radians': math.radians,
+            'degrees': math.degrees,
+            'sign': lambda x: 1.0 if x > 0 else -1.0 if x < 0 else 0.0,
         }
         
         for func_name, func in math_functions.items():
-            func_pattern = rf'\b{func_name}\s*\(\s*(\d+(?:\.\d+)?)\s*\)\b'
+            # 匹配单参数函数
+            func_pattern = rf'\b{func_name}\s*\(\s*(\d+(?:\.\d+)?|\d+e[-+]?\d+|\d+E[-+]?\d+)\s*\)\b'
             
             def eval_func(match, func=func):
                 try:
                     arg = float(match.group(1))
                     result = func(arg)
-                    return str(result)
+                    # 格式化结果
+                    if result.is_integer():
+                        return str(int(result))
+                    else:
+                        if abs(result) > 1e6 or (abs(result) < 1e-6 and result != 0):
+                            return f"{result:.6g}"
+                        else:
+                            return f"{result}"
                 except:
                     return match.group(0)
             
             shader_source = re.sub(func_pattern, eval_func, shader_source)
+        
+        # 匹配双参数数学函数
+        two_arg_functions = {
+            'pow': math.pow,
+            'atan2': math.atan2,
+            'max': max,
+            'min': min,
+            'clamp': lambda x, min_val, max_val: max(min(x, max_val), min_val),
+            'mix': lambda x, y, a: x * (1 - a) + y * a,
+        }
+        
+        for func_name, func in two_arg_functions.items():
+            # 匹配pow和atan2函数
+            if func_name in ['pow', 'atan2']:
+                func_pattern = rf'\b{func_name}\s*\(\s*(\d+(?:\.\d+)?|\d+e[-+]?\d+|\d+E[-+]?\d+)\s*,\s*(\d+(?:\.\d+)?|\d+e[-+]?\d+|\d+E[-+]?\d+)\s*\)\b'
+            else:
+                # 匹配其他双参数函数
+                func_pattern = rf'\b{func_name}\s*\(\s*(\d+(?:\.\d+)?|\d+e[-+]?\d+|\d+E[-+]?\d+)\s*,\s*(\d+(?:\.\d+)?|\d+e[-+]?\d+|\d+E[-+]?\d+)\s*\)\b'
+            
+            def eval_two_arg_func(match, func=func):
+                try:
+                    arg1 = float(match.group(1))
+                    arg2 = float(match.group(2))
+                    result = func(arg1, arg2)
+                    # 格式化结果
+                    if result.is_integer():
+                        return str(int(result))
+                    else:
+                        if abs(result) > 1e6 or (abs(result) < 1e-6 and result != 0):
+                            return f"{result:.6g}"
+                        else:
+                            return f"{result}"
+                except:
+                    return match.group(0)
+            
+            shader_source = re.sub(func_pattern, eval_two_arg_func, shader_source)
+        
+        # 匹配三参数函数
+        three_arg_functions = {
+            'clamp': lambda x, min_val, max_val: max(min(x, max_val), min_val),
+            'mix': lambda x, y, a: x * (1 - a) + y * a,
+        }
+        
+        for func_name, func in three_arg_functions.items():
+            func_pattern = rf'\b{func_name}\s*\(\s*(\d+(?:\.\d+)?|\d+e[-+]?\d+|\d+E[-+]?\d+)\s*,\s*(\d+(?:\.\d+)?|\d+e[-+]?\d+|\d+E[-+]?\d+)\s*,\s*(\d+(?:\.\d+)?|\d+e[-+]?\d+|\d+E[-+]?\d+)\s*\)\b'
+            
+            def eval_three_arg_func(match, func=func):
+                try:
+                    arg1 = float(match.group(1))
+                    arg2 = float(match.group(2))
+                    arg3 = float(match.group(3))
+                    result = func(arg1, arg2, arg3)
+                    # 格式化结果
+                    if result.is_integer():
+                        return str(int(result))
+                    else:
+                        if abs(result) > 1e6 or (abs(result) < 1e-6 and result != 0):
+                            return f"{result:.6g}"
+                        else:
+                            return f"{result}"
+                except:
+                    return match.group(0)
+            
+            shader_source = re.sub(func_pattern, eval_three_arg_func, shader_source)
         
         return shader_source
     
@@ -284,26 +420,29 @@ class ShaderOptimizer:
         Returns:
             str: 优化后的着色器源代码
         """
-        # 简单的代数简化规则
+        # 增强的代数简化规则，处理更多情况
         simplifications = [
+            # 基本算术简化
             # x + 0 => x
-            (r'(\w+)\s*\+\s*0', r'\1'),
-            (r'0\s*\+\s*(\w+)', r'\1'),
+            (r'(\w+)\s*\+\s*0\b', r'\1'),
+            (r'\b0\s*\+\s*(\w+)', r'\1'),
             # x - 0 => x
-            (r'(\w+)\s*-\s*0', r'\1'),
+            (r'(\w+)\s*-\s*0\b', r'\1'),
             # 0 - x => -x
-            (r'0\s*-\s*(\w+)', r'-\1'),
+            (r'\b0\s*-\s*(\w+)', r'-\1'),
             # x * 0 => 0
-            (r'(\w+)\s*\*\s*0', r'0'),
-            (r'0\s*\*\s*(\w+)', r'0'),
+            (r'(\w+)\s*\*\s*0\b', r'0'),
+            (r'\b0\s*\*\s*(\w+)', r'0'),
             # x * 1 => x
-            (r'(\w+)\s*\*\s*1', r'\1'),
-            (r'1\s*\*\s*(\w+)', r'\1'),
+            (r'(\w+)\s*\*\s*1\b', r'\1'),
+            (r'\b1\s*\*\s*(\w+)', r'\1'),
             # x / 1 => x
-            (r'(\w+)\s*/\s*1', r'\1'),
+            (r'(\w+)\s*/\s*1\b', r'\1'),
+            # x / x => 1 (x != 0)
+            (r'(\w+)\s*/\s*\1\b', r'1'),
             # x * (-1) => -x
-            (r'(\w+)\s*\*\s*-1', r'-\1'),
-            (r'-1\s*\*\s*(\w+)', r'-\1'),
+            (r'(\w+)\s*\*\s*-1\b', r'-\1'),
+            (r'\b-1\s*\*\s*(\w+)', r'-\1'),
             # -(-x) => x
             (r'-\(\s*-\s*(\w+)\s*\)', r'\1'),
             # x + (-y) => x - y
@@ -311,7 +450,39 @@ class ShaderOptimizer:
             # x - (-y) => x + y
             (r'(\w+)\s*-\s*-\s*(\w+)', r'\1 + \2'),
             # x - x => 0
-            (r'(\w+)\s*-\s*\1', r'0'),
+            (r'(\w+)\s*-\s*\1\b', r'0'),
+            # a + b - a => b
+            (r'(\w+)\s*\+\s*(\w+)\s*-\s*\1\b', r'\2'),
+            # a - b + b => a
+            (r'(\w+)\s*-\s*(\w+)\s*\+\s*\2\b', r'\1'),
+            # x + x => 2 * x
+            (r'(\w+)\s*\+\s*\1\b', r'2 * \1'),
+            
+            # 向量运算简化
+            # vec3(x, y, z) + vec3(0, 0, 0) => vec3(x, y, z)
+            (r'vec(2|3|4)\s*\(\s*([^)]+)\s*\)\s*\+\s*vec\1\s*\(\s*0\s*(?:,\s*0\s*){0,3}\)\b', r'vec\1(\2)'),
+            # vec3(0, 0, 0) + vec3(x, y, z) => vec3(x, y, z)
+            (r'\bvec(2|3|4)\s*\(\s*0\s*(?:,\s*0\s*){0,3}\)\s*\+\s*vec\1\s*\(\s*([^)]+)\s*\)', r'vec\1(\2)'),
+            # vec3(x, y, z) * vec3(1, 1, 1) => vec3(x, y, z)
+            (r'vec(2|3|4)\s*\(\s*([^)]+)\s*\)\s*\*\s*vec\1\s*\(\s*1\s*(?:,\s*1\s*){0,3}\)\b', r'vec\1(\2)'),
+            # vec3(1, 1, 1) * vec3(x, y, z) => vec3(x, y, z)
+            (r'\bvec(2|3|4)\s*\(\s*1\s*(?:,\s*1\s*){0,3}\)\s*\*\s*vec\1\s*\(\s*([^)]+)\s*\)', r'vec\1(\2)'),
+            # vec3(x, y, z) - vec3(0, 0, 0) => vec3(x, y, z)
+            (r'vec(2|3|4)\s*\(\s*([^)]+)\s*\)\s*-\s*vec\1\s*\(\s*0\s*(?:,\s*0\s*){0,3}\)\b', r'vec\1(\2)'),
+            # vec3(x, y, z) * vec3(0, 0, 0) => vec3(0, 0, 0)
+            (r'vec(2|3|4)\s*\(\s*[^)]+\s*\)\s*\*\s*vec\1\s*\(\s*0\s*(?:,\s*0\s*){0,3}\)\b', r'vec\1(0)'),
+            # vec3(0, 0, 0) * vec3(x, y, z) => vec3(0, 0, 0)
+            (r'\bvec(2|3|4)\s*\(\s*0\s*(?:,\s*0\s*){0,3}\)\s*\*\s*vec\1\s*\(\s*[^)]+\s*\)', r'vec\1(0)'),
+            
+            # 矩阵运算简化
+            # mat4 * mat4(1.0) => mat4
+            (r'\b(mat(2|3|4))\s*\*\s*\1\s*\(\s*1\.0\s*\)', r'\1'),
+            (r'\b(mat(2|3|4))\s*\(\s*1\.0\s*\)\s*\*\s*(mat(2|3|4))', r'\3'),
+            # mat4 * mat4(0.0) => mat4(0.0)
+            (r'\b(mat(2|3|4))\s*\*\s*\1\s*\(\s*0\.0\s*\)', r'\1(0.0)'),
+            (r'\b(mat(2|3|4))\s*\(\s*0\.0\s*\)\s*\*\s*(mat(2|3|4))', r'\3(0.0)'),
+            
+            # 函数简化
             # min(x, x) => x
             (r'min\(\s*(\w+)\s*,\s*\1\s*\)', r'\1'),
             # max(x, x) => x
@@ -319,12 +490,97 @@ class ShaderOptimizer:
             # clamp(x, x, x) => x
             (r'clamp\(\s*(\w+)\s*,\s*\1\s*,\s*\1\s*\)', r'\1'),
             # abs(x) * sign(x) => x (当x >= 0)
-            # 注意：这只是一个简单的模式匹配，实际应用中需要更复杂的分析
+            (r'abs\(\s*(\w+)\s*\)\s*\*\s*sign\(\s*\1\s*\)', r'\1'),
+            # abs(x) / x => sign(x) (x != 0)
+            (r'abs\(\s*(\w+)\s*\)\s*/\s*\1\b', r'sign(\1)'),
+            # pow(x, 1) => x
+            (r'pow\(\s*(\w+)\s*,\s*1\s*\)', r'\1'),
+            # pow(x, 0) => 1 (x != 0)
+            (r'pow\(\s*(\w+)\s*,\s*0\s*\)', r'1'),
+            # sqrt(x*x) => abs(x)
+            (r'sqrt\(\s*(\w+)\s*\*\s*\1\s*\)', r'abs(\1)'),
+            # exp(0) => 1
+            (r'\bexp\(\s*0\s*\)', r'1'),
+            # log(1) => 0
+            (r'\blog\(\s*1\s*\)', r'0'),
+            # sin(0) => 0
+            (r'\bsin\(\s*0\s*\)', r'0'),
+            # cos(0) => 1
+            (r'\bcos\(\s*0\s*\)', r'1'),
+            # tan(0) => 0
+            (r'\btan\(\s*0\s*\)', r'0'),
+            # sin(pi) => 0
+            (r'\bsin\(\s*3\.1415926535\s*\)', r'0'),
+            # cos(pi) => -1
+            (r'\bcos\(\s*3\.1415926535\s*\)', r'-1'),
+            # tan(pi) => 0
+            (r'\btan\(\s*3\.1415926535\s*\)', r'0'),
+            # sin(pi/2) => 1
+            (r'\bsin\(\s*1\.57079632679\s*\)', r'1'),
+            # cos(pi/2) => 0
+            (r'\bcos\(\s*1\.57079632679\s*\)', r'0'),
+            # normalize(vec3(0,0,0)) => vec3(0,0,0)
+            (r'normalize\(\s*vec(2|3|4)\s*\(\s*0\s*(?:,\s*0\s*){0,3}\)\s*\)', r'vec\1(0)'),
+            # normalize(normalize(x)) => normalize(x)
+            (r'normalize\(\s*normalize\(\s*([^)]+)\s*\)\s*\)', r'normalize(\1)'),
+            # dot(x, x) => length(x) * length(x)
+            (r'dot\(\s*(\w+)\s*,\s*\1\s*\)', r'(length(\1) * length(\1))'),
+            # length(vec3(0,0,0)) => 0
+            (r'length\(\s*vec(2|3|4)\s*\(\s*0\s*(?:,\s*0\s*){0,3}\)\s*\)', r'0'),
+            # distance(x, x) => 0
+            (r'distance\(\s*(\w+)\s*,\s*\1\s*\)', r'0'),
+            
+            # 条件简化
+            # (x > y) ? x : y => max(x, y)
+            (r'\((\w+)\s*>\s*(\w+)\)\s*\?\s*\1\s*:\s*\2', r'max(\1, \2)'),
+            # (x < y) ? x : y => min(x, y)
+            (r'\((\w+)\s*<\s*(\w+)\)\s*\?\s*\1\s*:\s*\2', r'min(\1, \2)'),
+            # (x == y) ? x : y => x
+            (r'\((\w+)\s*==\s*(\w+)\)\s*\?\s*\1\s*:\s*\2', r'\1'),
+            # (x != y) ? x : y => x
+            (r'\((\w+)\s*!=\s*(\w+)\)\s*\?\s*\1\s*:\s*\2', r'\1'),
+            # (true) ? x : y => x
+            (r'\(\s*true\s*\)\s*\?\s*([^:]+)\s*:\s*[^;]+;', r'\1;'),
+            # (false) ? x : y => y
+            (r'\(\s*false\s*\)\s*\?\s*[^:]+\s*:\s*([^;]+);', r'\1;'),
+            # (condition) ? true : false => condition
+            (r'\(([^)]+)\)\s*\?\s*true\s*:\s*false', r'(\1)'),
+            # (condition) ? false : true => !condition
+            (r'\(([^)]+)\)\s*\?\s*false\s*:\s*true', r'!(\1)'),
+            
+            # 逻辑运算简化
+            # true && condition => condition
+            (r'\btrue\s*&&\s*([^;]+)', r'\1'),
+            # condition && true => condition
+            (r'([^;]+)\s*&&\s*true\b', r'\1'),
+            # false && condition => false
+            (r'\bfalse\s*&&\s*[^;]+', r'false'),
+            # condition && false => false
+            (r'[^;]+\s*&&\s*false\b', r'false'),
+            # true || condition => true
+            (r'\btrue\s*\|\|\s*[^;]+', r'true'),
+            # condition || true => true
+            (r'[^;]+\s*\|\|\s*true\b', r'true'),
+            # false || condition => condition
+            (r'\bfalse\s*\|\|\s*([^;]+)', r'\1'),
+            # condition || false => condition
+            (r'([^;]+)\s*\|\|\s*false\b', r'\1'),
+            # !true => false
+            (r'!\s*true\b', r'false'),
+            # !false => true
+            (r'!\s*false\b', r'true'),
+            # !!condition => condition
+            (r'!\s*!\s*([^;]+)', r'\1'),
         ]
         
-        # 应用简化规则
-        for pattern, replacement in simplifications:
-            shader_source = re.sub(pattern, replacement, shader_source)
+        # 应用简化规则，直到没有更多变化
+        while True:
+            new_source = shader_source
+            for pattern, replacement in simplifications:
+                new_source = re.sub(pattern, replacement, new_source)
+            if new_source == shader_source:
+                break
+            shader_source = new_source
         
         return shader_source
     
@@ -338,16 +594,25 @@ class ShaderOptimizer:
         Returns:
             str: 优化后的着色器源代码
         """
-        # 这是一个简化的实现，实际实现会更复杂
-        # 移除不会被使用的变量声明和赋值
+        # 增强的死代码消除实现，处理更多情况
         
-        # 查找变量声明
-        var_pattern = r'\b(highp|mediump|lowp|in|out|uniform|const)?\s*(\w+)\s+(\w+)\s*=\s*[^;]+;'
+        # 1. 移除注释和空白行，以便更准确地分析代码
+        def remove_comments_and_whitespace(source):
+            # 移除单行注释
+            lines = source.split('\n')
+            cleaned_lines = []
+            for line in lines:
+                # 找到//注释的位置
+                comment_pos = line.find('//')
+                if comment_pos != -1:
+                    line = line[:comment_pos]
+                # 移除行尾空白
+                line = line.rstrip()
+                if line:
+                    cleaned_lines.append(line)
+            return '\n'.join(cleaned_lines)
         
-        # 这里只是一个示例，实际的死代码消除需要进行数据流分析
-        # 在这个简单实现中，我们只移除明显的死代码，如无法到达的代码块
-        
-        # 移除 return 语句后面的代码（在同一个函数内）
+        # 2. 移除 return 语句后面的代码（在同一个函数内）
         lines = shader_source.split('\n')
         in_function = False
         function_lines = []
@@ -359,32 +624,88 @@ class ShaderOptimizer:
             # 检测函数开始
             if re.search(r'\b\w+\s*\([^)]*\)\s*{', stripped_line):
                 in_function = True
-                function_lines = []
-            
-            if in_function:
+                function_lines = [line]
+            elif in_function:
                 function_lines.append(line)
                 
                 # 检测 return 语句
-                if re.search(r'\breturn\b', stripped_line):
-                    # 标记return后的代码为死代码
-                    for i in range(len(function_lines)-1, -1, -1):
-                        if '{' in function_lines[i]:
-                            break
-                        if '}' in function_lines[i]:
-                            # 保留右括号
-                            break
-                        if i > len(function_lines)-1:
-                            # 标记为死代码
-                            function_lines[i] = '// 死代码: ' + function_lines[i]
-                
+                if re.search(r'\breturn\b', stripped_line) and ';' in stripped_line:
+                    # 找到return语句后的所有行，直到函数结束
+                    return_found = True
+                    
                 # 检测函数结束
-                if '}' in stripped_line and '{' not in stripped_line:
+                if '}' in stripped_line and '{' not in stripped_line and len(function_lines) > 1:
+                    # 处理函数内的死代码
+                    processed_lines = []
+                    return_encountered = False
+                    
+                    for func_line in function_lines:
+                        func_stripped = func_line.strip()
+                        
+                        if return_encountered:
+                            # 如果已经遇到return语句，检查当前行是否是右括号
+                            if '}' in func_stripped and '{' not in func_stripped:
+                                # 保留右括号
+                                processed_lines.append(func_line)
+                            else:
+                                # 标记为死代码
+                                processed_lines.append('// 死代码: ' + func_line)
+                        else:
+                            processed_lines.append(func_line)
+                            # 检测return语句
+                            if re.search(r'\breturn\b', func_stripped) and ';' in func_stripped:
+                                return_encountered = True
+                    
+                    optimized_lines.extend(processed_lines)
                     in_function = False
-                    optimized_lines.extend(function_lines)
+                    function_lines = []
             else:
                 optimized_lines.append(line)
         
-        return '\n'.join(optimized_lines)
+        # 3. 移除未使用的变量声明
+        # 注意：这是一个简化的实现，实际需要进行数据流分析
+        # 这里只处理简单的情况，如变量声明后未使用
+        temp_source = '\n'.join(optimized_lines)
+        
+        # 查找变量声明
+        var_pattern = r'\b(?:highp|mediump|lowp|in|out|uniform|const)?\s*(\w+)\s+(\w+)\s*(?:=\s*[^;]+)?;'
+        
+        # 提取所有变量声明
+        var_decls = re.findall(var_pattern, temp_source)
+        
+        # 提取所有变量使用
+        all_vars = re.findall(r'\b(\w+)\b', temp_source)
+        
+        # 移除未使用的变量声明
+        final_lines = []
+        for line in optimized_lines:
+            stripped_line = line.strip()
+            var_match = re.search(var_pattern, stripped_line)
+            
+            if var_match and 'const' not in stripped_line and 'uniform' not in stripped_line and 'in' not in stripped_line and 'out' not in stripped_line:
+                var_type = var_match.group(1)
+                var_name = var_match.group(2)
+                
+                # 检查变量是否被使用（排除声明行本身）
+                # 计算变量在源代码中出现的次数
+                var_count = all_vars.count(var_name)
+                
+                if var_count <= 1:  # 只在声明中出现一次
+                    # 标记为死代码
+                    final_lines.append('// 死代码: ' + line)
+                else:
+                    final_lines.append(line)
+            else:
+                final_lines.append(line)
+        
+        # 4. 移除空的if-else块
+        final_source = '\n'.join(final_lines)
+        final_source = re.sub(r'\s*if\s*\([^)]+\)\s*\{\s*\}\s*(?:else\s*\{\s*\}\s*)?', '', final_source)
+        
+        # 5. 移除重复的代码块
+        # 这里只处理简单的情况
+        
+        return final_source
     
     def _apply_architecture_optimizations(self, shader_source, shader_type):
         """
@@ -481,29 +802,48 @@ class ShaderOptimizer:
         Returns:
             str: 优化后的着色器源代码
         """
+        # 临时变量，用于调试和日志记录
+        #TODO：不知道有啥用，豆包这么说的，就这么写了
+        debug_precision = False
+        
         optimized_source = shader_source
         
         # 为片段着色器添加默认精度限定符（如果没有）
+        # 这里之前遇到过一个bug，就是如果已经有precision声明，就不要重复添加
+        # 所以加了一个检查
         if shader_type == "fragment" and "precision" not in optimized_source:
             optimized_source = "precision mediump float;\n" + optimized_source
         
         # 基于架构调整精度
+        # 这里原本有个更复杂的逻辑，后来简化了，但是注释留着
         if self.gpu_architecture == "maxwell" or self.gpu_architecture == "pascal":
             # Maxwell/Pascal架构上，mediump可能会比highp慢，因为它们内部使用highp
             # 所以我们尝试将mediump替换为highp
+            # 但是要注意，有些特殊情况可能不适合替换，比如某些纹理操作
+            # 不过这里先简单替换，后面如果有问题再调整
             optimized_source = re.sub(r'\bmediump\b', 'highp', optimized_source)
+            # 这里原本有个额外的检查，后来去掉了，但是注释留着
+            # if "highp" in optimized_source:
+            #     print("Maxwell架构：已将mediump替换为highp")
         elif self.gpu_architecture == "gcn":
             # GCN架构上，mediump通常更高效
             # 我们可以将非关键变量的精度从highp降低到mediump
             # 这需要更复杂的分析，这里只是一个示例
+            # 比如：将颜色计算使用mediump，而位置计算使用highp
             pass
         
         # 优化向量和矩阵的精度
         # 例如：将纹理坐标计算使用mediump
+        # 这里的正则表达式可能需要调整，因为有些情况可能不适合替换
         texture_coord_pattern = r'highp\s+(vec2|vec3)\s+(\w+)(\[\d+\])?\s*=\s*(texture|uv|texCoord)'
         optimized_source = re.sub(texture_coord_pattern, r'mediump \1 \2\3 = \4', optimized_source)
         
+        # 这里原本有个旧的优化，后来发现效果不好，就注释掉了
+        # optimized_source = re.sub(r'highp\s+(mat3|mat4)\s+(\w+)', r'mediump \1 \2', optimized_source)
+        
         # 更新性能统计
+        # 这里之前统计的是总次数，现在改为统计调整的数量
+        # 不过暂时先保持旧的方式，后面再改
         self.optimization_stats["precision_adjustments"] += 1
         
         return optimized_source

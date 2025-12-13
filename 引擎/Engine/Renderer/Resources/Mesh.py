@@ -3,7 +3,7 @@
 网格资源类，用于管理3D模型的顶点、索引和其他几何数据
 """
 
-from Engine.Math.Math import Vector3, Vector2, BoundingBox
+from Engine.Math import Vector3, Vector2, BoundingBox
 import math
 
 # 为了方便使用，将常用的数学函数导入到当前命名空间

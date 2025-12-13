@@ -1,6 +1,19 @@
 import os
 import numpy as np
 from collections import OrderedDict
+import threading
+import queue
+import time
+from enum import Enum
+
+class ResourceLoadStatus(Enum):
+    """
+    资源加载状态枚举
+    """
+    LOADING = "loading"  # 正在加载
+    COMPLETED = "completed"  # 加载完成
+    FAILED = "failed"  # 加载失败
+    PENDING = "pending"  # 等待加载
 
 class ResourceManager:
     """
@@ -32,7 +45,10 @@ class ResourceManager:
         self.texture_compression_quality = "medium"  # 压缩质量
         
         # 资源优先级队列（用于资源换入换出）
-        self.resource_priority = OrderedDict()
+        # 使用更高效的数据结构存储资源优先级信息
+        self.resource_priority = {}  # 资源ID -> (last_used_time, resource_type)
+        self.resource_last_used = {}  # 资源ID -> 最后使用时间
+        self.resource_type_map = {}  # 资源ID -> 资源类型
         
         # 资源加载状态
         self.loading_queue = []
@@ -49,6 +65,18 @@ class ResourceManager:
         # 纹理流配置
         self.texture_streaming_enabled = True
         self.streaming_distance_threshold = 100.0  # 纹理流距离阈值
+        
+        # 异步加载相关
+        self.async_loading_enabled = True  # 是否启用异步加载
+        self.loading_threads = []  # 加载线程列表
+        self.max_loading_threads = 4  # 最大加载线程数
+        self.load_queue = queue.Queue()  # 加载任务队列
+        self.load_complete_queue = queue.Queue()  # 加载完成队列
+        self.load_status = {}  # 资源加载状态
+        self.load_events = {}  # 资源加载完成事件
+        self.running = False  # 加载线程运行状态
+        self.load_lock = threading.RLock()  # 加载状态锁
+        self.resource_lock = threading.RLock()  # 资源访问锁
     
     def initialize(self):
         """
@@ -62,13 +90,160 @@ class ResourceManager:
         # 初始化内存监控
         self._initialize_memory_monitoring()
         
+        # 初始化异步加载系统
+        self._initialize_async_loading()
+        
         print(f"资源管理器初始化完成，最大VRAM使用限制: {self.max_vram_usage_mb}MB")
+    
+    def _initialize_async_loading(self):
+        """
+        初始化异步加载系统
+        """
+        self.running = True
+        
+        # 创建并启动加载线程
+        for i in range(self.max_loading_threads):
+            thread = threading.Thread(target=self._loading_thread, name=f"ResourceLoader-{i}", daemon=True)
+            self.loading_threads.append(thread)
+            thread.start()
+        
+        print(f"异步资源加载系统已初始化，创建了 {self.max_loading_threads} 个加载线程")
+    
+    def _loading_thread(self):
+        """
+        资源加载线程函数
+        """
+        while self.running:
+            try:
+                # 从队列中获取加载任务
+                task = self.load_queue.get(timeout=1.0)
+                
+                if task is None:
+                    # 结束线程
+                    break
+                
+                # 执行加载任务
+                self._process_loading_task(task)
+                
+                # 标记任务完成
+                self.load_queue.task_done()
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"加载线程错误: {e}")
+    
+    def _process_loading_task(self, task):
+        """
+        处理加载任务
+        
+        Args:
+            task: 加载任务字典，包含type, id, path, params等字段
+        """
+        try:
+            resource_type = task["type"]
+            resource_id = task["id"]
+            
+            # 更新加载状态为正在加载
+            with self.load_lock:
+                self.load_status[resource_id] = ResourceLoadStatus.LOADING
+            
+            # 执行具体的加载操作
+            result = None
+            if resource_type == "texture":
+                result = self._load_texture_sync(task["path"], resource_id, **task["params"])
+            elif resource_type == "mesh":
+                result = self._load_mesh_sync(task["path"], resource_id, **task["params"])
+            elif resource_type == "shader":
+                result = self._load_shader_sync(task["vertex_path"], task["fragment_path"], resource_id, **task["params"])
+            elif resource_type == "material":
+                result = self._load_material_sync(task["material_data"], resource_id, **task["params"])
+            
+            # 更新加载状态
+            with self.load_lock:
+                if result:
+                    self.load_status[resource_id] = ResourceLoadStatus.COMPLETED
+                    # 将加载完成的资源添加到完成队列
+                    self.load_complete_queue.put((resource_type, resource_id))
+                else:
+                    self.load_status[resource_id] = ResourceLoadStatus.FAILED
+            
+        except Exception as e:
+            print(f"处理加载任务失败: {task}, 错误: {e}")
+            with self.load_lock:
+                self.load_status[task["id"]] = ResourceLoadStatus.FAILED
+    
+    def update(self, delta_time):
+        """
+        更新资源管理器，处理加载完成的资源
+        
+        Args:
+            delta_time: 帧间隔时间（秒）
+        """
+        # 处理加载完成的资源
+        self._process_loaded_resources()
+        
+        # 处理加载队列
+        self._process_loading_queue()
+        
+        # 处理卸载队列
+        self._process_unloading_queue()
+    
+    def _process_loaded_resources(self):
+        """
+        处理加载完成的资源
+        """
+        while True:
+            try:
+                # 从完成队列中获取已加载的资源
+                resource_type, resource_id = self.load_complete_queue.get_nowait()
+                
+                # 触发资源加载完成事件
+                with self.load_lock:
+                    if resource_id in self.load_events:
+                        for event in self.load_events[resource_id]:
+                            try:
+                                event(resource_id)
+                            except Exception as e:
+                                print(f"触发资源加载完成事件失败: {e}")
+                        # 移除事件
+                        del self.load_events[resource_id]
+                
+                print(f"资源加载完成: {resource_type} {resource_id}")
+            except queue.Empty:
+                break
+            except Exception as e:
+                print(f"处理已加载资源失败: {e}")
+    
+    def _process_loading_queue(self):
+        """
+        处理加载队列
+        """
+        # 这里可以添加队列处理逻辑，如优先级调整等
+        pass
+    
+    def _process_unloading_queue(self):
+        """
+        处理卸载队列
+        """
+        # 这里可以添加队列处理逻辑，如优先级调整等
+        pass
     
     def shutdown(self):
         """
         关闭资源管理器，释放所有资源
         """
         print("关闭资源管理器...")
+        
+        # 停止异步加载线程
+        self.running = False
+        
+        # 向加载队列中添加结束信号
+        for _ in range(self.max_loading_threads):
+            self.load_queue.put(None)
+        
+        # 等待所有加载线程结束
+        for thread in self.loading_threads:
+            thread.join()
         
         # 释放所有纹理
         for texture_id in list(self.textures.keys()):
@@ -93,11 +268,13 @@ class ResourceManager:
         self.materials.clear()
         self.reference_counts.clear()
         self.resource_priority.clear()
+        self.load_status.clear()
+        self.load_events.clear()
         
         self.current_vram_usage_mb = 0
         print("资源管理器已关闭，所有资源已释放")
     
-    def load_shader(self, vertex_path, fragment_path, shader_id=None):
+    def load_shader(self, vertex_path, fragment_path, shader_id=None, async_load=True):
         """
         加载着色器程序
         
@@ -105,6 +282,7 @@ class ResourceManager:
             vertex_path: 顶点着色器文件路径
             fragment_path: 片段着色器文件路径
             shader_id: 可选的着色器ID
+            async_load: 是否异步加载
             
         Returns:
             str: 着色器ID
@@ -116,42 +294,95 @@ class ResourceManager:
         # 检查着色器是否已加载
         if shader_id in self.shaders:
             # 增加引用计数
-            self.reference_counts[shader_id] += 1
+            with self.resource_lock:
+                self.reference_counts[shader_id] += 1
             return shader_id
         
-        print(f"加载着色器: {shader_id}")
+        # 检查是否正在加载
+        with self.load_lock:
+            if shader_id in self.load_status:
+                # 增加引用计数
+                if shader_id not in self.reference_counts:
+                    self.reference_counts[shader_id] = 1
+                else:
+                    self.reference_counts[shader_id] += 1
+                return shader_id
         
-        # 加载着色器源代码
-        vertex_code = self.load_shader_source(vertex_path)
-        fragment_code = self.load_shader_source(fragment_path)
-        
-        # 创建着色器程序
-        # 实际实现会使用平台特定的API创建着色器程序
-        shader_program = {
-            "vertex_code": vertex_code,
-            "fragment_code": fragment_code,
-            "id": shader_id
-        }
-        
-        # 计算着色器内存使用量（估计）
-        memory_usage = 0.1  # 估计值
-        
-        # 检查内存使用限制
-        if self._would_exceed_memory_limit(memory_usage):
-            # 释放一些低优先级资源
-            self._free_resources_to_make_space(memory_usage)
-        
-        # 更新VRAM使用量
-        self.current_vram_usage_mb += memory_usage
-        
-        # 存储着色器
-        self.shaders[shader_id] = shader_program
-        self.reference_counts[shader_id] = 1
-        
-        # 更新资源优先级
-        self._update_resource_priority(shader_id, "shader")
+        if self.async_loading_enabled and async_load:
+            # 异步加载
+            with self.load_lock:
+                self.load_status[shader_id] = ResourceLoadStatus.PENDING
+                self.reference_counts[shader_id] = 1
+            
+            # 创建加载任务
+            task = {
+                "type": "shader",
+                "id": shader_id,
+                "vertex_path": vertex_path,
+                "fragment_path": fragment_path,
+                "params": {}
+            }
+            
+            # 将任务添加到加载队列
+            self.load_queue.put(task)
+            print(f"异步加载着色器: {shader_id}")
+        else:
+            # 同步加载
+            self._load_shader_sync(vertex_path, fragment_path, shader_id)
         
         return shader_id
+    
+    def _load_shader_sync(self, vertex_path, fragment_path, shader_id):
+        """
+        同步加载着色器程序
+        
+        Args:
+            vertex_path: 顶点着色器文件路径
+            fragment_path: 片段着色器文件路径
+            shader_id: 着色器ID
+            
+        Returns:
+            bool: 是否加载成功
+        """
+        try:
+            print(f"同步加载着色器: {shader_id}")
+            
+            # 加载着色器源代码
+            vertex_code = self.load_shader_source(vertex_path)
+            fragment_code = self.load_shader_source(fragment_path)
+            
+            # 创建着色器程序
+            # 实际实现会使用平台特定的API创建着色器程序
+            shader_program = {
+                "vertex_code": vertex_code,
+                "fragment_code": fragment_code,
+                "id": shader_id
+            }
+            
+            # 计算着色器内存使用量（估计）
+            memory_usage = 0.1  # 估计值
+            
+            # 检查内存使用限制
+            with self.resource_lock:
+                if self._would_exceed_memory_limit(memory_usage):
+                    # 释放一些低优先级资源
+                    self._free_resources_to_make_space(memory_usage)
+
+                # 更新VRAM使用量
+                self.current_vram_usage_mb += memory_usage
+                
+                # 存储着色器
+                self.shaders[shader_id] = shader_program
+                if shader_id not in self.reference_counts:
+                    self.reference_counts[shader_id] = 1
+                
+                # 更新资源优先级
+                self._update_resource_priority(shader_id, "shader")
+            
+            return True
+        except Exception as e:
+            print(f"同步加载着色器失败: {shader_id}, 错误: {e}")
+            return False
     
     def load_shader_source(self, shader_path):
         """
@@ -319,7 +550,7 @@ class ResourceManager:
                 }
                 """
     
-    def load_texture(self, texture_path, texture_id=None, compress_texture=True, mipmaps=True):
+    def load_texture(self, texture_path, texture_id=None, compress_texture=True, mipmaps=True, async_load=True):
         """
         加载纹理，应用压缩和质量设置
         
@@ -328,6 +559,7 @@ class ResourceManager:
             texture_id: 可选的纹理ID
             compress_texture: 是否压缩纹理
             mipmaps: 是否生成mipmap
+            async_load: 是否异步加载
             
         Returns:
             str: 纹理ID
@@ -339,47 +571,103 @@ class ResourceManager:
         # 检查纹理是否已加载
         if texture_id in self.textures:
             # 增加引用计数
-            self.reference_counts[texture_id] += 1
+            with self.resource_lock:
+                self.reference_counts[texture_id] += 1
             return texture_id
         
-        print(f"加载纹理: {texture_path}")
+        # 检查是否正在加载
+        with self.load_lock:
+            if texture_id in self.load_status:
+                # 增加引用计数
+                if texture_id not in self.reference_counts:
+                    self.reference_counts[texture_id] = 1
+                else:
+                    self.reference_counts[texture_id] += 1
+                return texture_id
         
-        # 应用纹理质量设置
-        actual_path = self._get_texture_path_for_quality(texture_path)
-        
-        # 加载纹理数据
-        # 实际实现会使用平台特定的纹理加载API
-        texture_data = self._load_texture_data(actual_path)
-        
-        # 生成mipmap
-        if mipmaps:
-            texture_data = self._generate_mipmaps(texture_data)
-        
-        # 应用纹理压缩
-        if compress_texture:
-            compressed_texture = self._compress_texture(texture_data)
+        if self.async_loading_enabled and async_load:
+            # 异步加载
+            with self.load_lock:
+                self.load_status[texture_id] = ResourceLoadStatus.PENDING
+                self.reference_counts[texture_id] = 1
+            
+            # 创建加载任务
+            task = {
+                "type": "texture",
+                "id": texture_id,
+                "path": texture_path,
+                "params": {
+                    "compress_texture": compress_texture,
+                    "mipmaps": mipmaps
+                }
+            }
+            
+            # 将任务添加到加载队列
+            self.load_queue.put(task)
+            print(f"异步加载纹理: {texture_id}")
         else:
-            compressed_texture = texture_data
-        
-        # 计算纹理内存使用量
-        memory_usage = self._calculate_texture_memory_usage(compressed_texture)
-        
-        # 检查内存使用限制
-        if self._would_exceed_memory_limit(memory_usage):
-            # 释放一些低优先级资源
-            self._free_resources_to_make_space(memory_usage)
-        
-        # 更新VRAM使用量
-        self.current_vram_usage_mb += memory_usage
-        
-        # 存储纹理
-        self.textures[texture_id] = compressed_texture
-        self.reference_counts[texture_id] = 1
-        
-        # 更新资源优先级
-        self._update_resource_priority(texture_id, "texture")
+            # 同步加载
+            self._load_texture_sync(texture_path, texture_id, compress_texture, mipmaps)
         
         return texture_id
+    
+    def _load_texture_sync(self, texture_path, texture_id, compress_texture=True, mipmaps=True):
+        """
+        同步加载纹理
+        
+        Args:
+            texture_path: 纹理文件路径
+            texture_id: 纹理ID
+            compress_texture: 是否压缩纹理
+            mipmaps: 是否生成mipmap
+            
+        Returns:
+            bool: 是否加载成功
+        """
+        try:
+            print(f"同步加载纹理: {texture_id}")
+            
+            # 应用纹理质量设置
+            actual_path = self._get_texture_path_for_quality(texture_path)
+            
+            # 加载纹理数据
+            # 实际实现会使用平台特定的纹理加载API
+            texture_data = self._load_texture_data(actual_path)
+            
+            # 生成mipmap
+            if mipmaps:
+                texture_data = self._generate_mipmaps(texture_data)
+            
+            # 应用纹理压缩
+            if compress_texture:
+                compressed_texture = self._compress_texture(texture_data)
+            else:
+                compressed_texture = texture_data
+            
+            # 计算纹理内存使用量
+            memory_usage = self._calculate_texture_memory_usage(compressed_texture)
+            
+            with self.resource_lock:
+                # 检查内存使用限制
+                if self._would_exceed_memory_limit(memory_usage):
+                    # 释放一些低优先级资源
+                    self._free_resources_to_make_space(memory_usage)
+                
+                # 更新VRAM使用量
+                self.current_vram_usage_mb += memory_usage
+                
+                # 存储纹理
+                self.textures[texture_id] = compressed_texture
+                if texture_id not in self.reference_counts:
+                    self.reference_counts[texture_id] = 1
+                
+                # 更新资源优先级
+                self._update_resource_priority(texture_id, "texture")
+            
+            return True
+        except Exception as e:
+            print(f"同步加载纹理失败: {texture_id}, 错误: {e}")
+            return False
     
     def unload_texture(self, texture_id):
         """
@@ -398,13 +686,14 @@ class ResourceManager:
         if self.reference_counts[texture_id] <= 0:
             self._free_texture(texture_id)
     
-    def load_mesh(self, mesh_path, mesh_id=None):
+    def load_mesh(self, mesh_path, mesh_id=None, async_load=True):
         """
         加载网格，生成LOD
         
         Args:
             mesh_path: 网格文件路径
             mesh_id: 可选的网格ID
+            async_load: 是否异步加载
             
         Returns:
             str: 网格ID
@@ -416,39 +705,90 @@ class ResourceManager:
         # 检查网格是否已加载
         if mesh_id in self.meshes:
             # 增加引用计数
-            self.reference_counts[mesh_id] += 1
+            with self.resource_lock:
+                self.reference_counts[mesh_id] += 1
             return mesh_id
         
-        print(f"加载网格: {mesh_path}")
+        # 检查是否正在加载
+        with self.load_lock:
+            if mesh_id in self.load_status:
+                # 增加引用计数
+                if mesh_id not in self.reference_counts:
+                    self.reference_counts[mesh_id] = 1
+                else:
+                    self.reference_counts[mesh_id] += 1
+                return mesh_id
         
-        # 加载网格数据
-        mesh_data = self._load_mesh_data(mesh_path)
-        
-        # 生成LOD
-        if self.enable_lod_system:
-            mesh_data_with_lod = self._generate_lod(mesh_data)
+        if self.async_loading_enabled and async_load:
+            # 异步加载
+            with self.load_lock:
+                self.load_status[mesh_id] = ResourceLoadStatus.PENDING
+                self.reference_counts[mesh_id] = 1
+            
+            # 创建加载任务
+            task = {
+                "type": "mesh",
+                "id": mesh_id,
+                "path": mesh_path,
+                "params": {}
+            }
+            
+            # 将任务添加到加载队列
+            self.load_queue.put(task)
+            print(f"异步加载网格: {mesh_id}")
         else:
-            mesh_data_with_lod = {"lod_0": mesh_data}
-        
-        # 计算网格内存使用量
-        memory_usage = self._calculate_mesh_memory_usage(mesh_data_with_lod)
-        
-        # 检查内存使用限制
-        if self._would_exceed_memory_limit(memory_usage):
-            # 释放一些低优先级资源
-            self._free_resources_to_make_space(memory_usage)
-        
-        # 更新VRAM使用量
-        self.current_vram_usage_mb += memory_usage
-        
-        # 存储网格
-        self.meshes[mesh_id] = mesh_data_with_lod
-        self.reference_counts[mesh_id] = 1
-        
-        # 更新资源优先级
-        self._update_resource_priority(mesh_id, "mesh")
+            # 同步加载
+            self._load_mesh_sync(mesh_path, mesh_id)
         
         return mesh_id
+    
+    def _load_mesh_sync(self, mesh_path, mesh_id):
+        """
+        同步加载网格
+        
+        Args:
+            mesh_path: 网格文件路径
+            mesh_id: 网格ID
+            
+        Returns:
+            bool: 是否加载成功
+        """
+        try:
+            print(f"同步加载网格: {mesh_id}")
+            
+            # 加载网格数据
+            mesh_data = self._load_mesh_data(mesh_path)
+            
+            # 生成LOD
+            if self.enable_lod_system:
+                mesh_data_with_lod = self._generate_lod(mesh_data)
+            else:
+                mesh_data_with_lod = {"lod_0": mesh_data}
+            
+            # 计算网格内存使用量
+            memory_usage = self._calculate_mesh_memory_usage(mesh_data_with_lod)
+            
+            with self.resource_lock:
+                # 检查内存使用限制
+                if self._would_exceed_memory_limit(memory_usage):
+                    # 释放一些低优先级资源
+                    self._free_resources_to_make_space(memory_usage)
+                
+                # 更新VRAM使用量
+                self.current_vram_usage_mb += memory_usage
+                
+                # 存储网格
+                self.meshes[mesh_id] = mesh_data_with_lod
+                if mesh_id not in self.reference_counts:
+                    self.reference_counts[mesh_id] = 1
+                
+                # 更新资源优先级
+                self._update_resource_priority(mesh_id, "mesh")
+            
+            return True
+        except Exception as e:
+            print(f"同步加载网格失败: {mesh_id}, 错误: {e}")
+            return False
     
     def unload_mesh(self, mesh_id):
         """
@@ -482,13 +822,14 @@ class ResourceManager:
             if self.textures:  # 只有在已初始化后才重新加载
                 self._reload_all_textures_for_quality(quality)
     
-    def load_material(self, material_data, material_id=None):
+    def load_material(self, material_data, material_id=None, async_load=True):
         """
         加载材质资源
         
         Args:
             material_data: 材质数据
             material_id: 可选的材质ID
+            async_load: 是否异步加载
             
         Returns:
             str: 材质ID
@@ -500,30 +841,81 @@ class ResourceManager:
         # 检查材质是否已加载
         if material_id in self.materials:
             # 增加引用计数
-            self.reference_counts[material_id] += 1
+            with self.resource_lock:
+                self.reference_counts[material_id] += 1
             return material_id
         
-        print(f"加载材质: {material_id}")
+        # 检查是否正在加载
+        with self.load_lock:
+            if material_id in self.load_status:
+                # 增加引用计数
+                if material_id not in self.reference_counts:
+                    self.reference_counts[material_id] = 1
+                else:
+                    self.reference_counts[material_id] += 1
+                return material_id
         
-        # 计算材质内存使用量（估计）
-        memory_usage = 0.05  # 估计值
-        
-        # 检查内存使用限制
-        if self._would_exceed_memory_limit(memory_usage):
-            # 释放一些低优先级资源
-            self._free_resources_to_make_space(memory_usage)
-        
-        # 更新VRAM使用量
-        self.current_vram_usage_mb += memory_usage
-        
-        # 存储材质
-        self.materials[material_id] = material_data
-        self.reference_counts[material_id] = 1
-        
-        # 更新资源优先级
-        self._update_resource_priority(material_id, "material")
+        if self.async_loading_enabled and async_load:
+            # 异步加载
+            with self.load_lock:
+                self.load_status[material_id] = ResourceLoadStatus.PENDING
+                self.reference_counts[material_id] = 1
+            
+            # 创建加载任务
+            task = {
+                "type": "material",
+                "id": material_id,
+                "material_data": material_data,
+                "params": {}
+            }
+            
+            # 将任务添加到加载队列
+            self.load_queue.put(task)
+            print(f"异步加载材质: {material_id}")
+        else:
+            # 同步加载
+            self._load_material_sync(material_data, material_id)
         
         return material_id
+    
+    def _load_material_sync(self, material_data, material_id):
+        """
+        同步加载材质
+        
+        Args:
+            material_data: 材质数据
+            material_id: 材质ID
+            
+        Returns:
+            bool: 是否加载成功
+        """
+        try:
+            print(f"同步加载材质: {material_id}")
+            
+            # 计算材质内存使用量（估计）
+            memory_usage = 0.05  # 估计值
+            
+            with self.resource_lock:
+                # 检查内存使用限制
+                if self._would_exceed_memory_limit(memory_usage):
+                    # 释放一些低优先级资源
+                    self._free_resources_to_make_space(memory_usage)
+                
+                # 更新VRAM使用量
+                self.current_vram_usage_mb += memory_usage
+                
+                # 存储材质
+                self.materials[material_id] = material_data
+                if material_id not in self.reference_counts:
+                    self.reference_counts[material_id] = 1
+                
+                # 更新资源优先级
+                self._update_resource_priority(material_id, "material")
+            
+            return True
+        except Exception as e:
+            print(f"同步加载材质失败: {material_id}, 错误: {e}")
+            return False
     
     def unload_material(self, material_id):
         """
@@ -710,21 +1102,37 @@ class ResourceManager:
         target_space = self.current_vram_usage_mb + required_space_mb - self.max_vram_usage_mb
         freed_space = 0.0
         
-        # 从优先级队列中获取低优先级资源
-        resources_to_unload = []
-        for resource_id, resource_type in reversed(list(self.resource_priority.items())):
+        # 如果当前使用量没有超过限制，无需释放
+        if target_space <= 0:
+            return
+        
+        # 收集所有可卸载的资源，并按优先级排序（最久未使用的资源优先）
+        current_time = time.time()
+        resources_to_consider = []
+        
+        for resource_id, (last_used, resource_type) in self.resource_priority.items():
             # 跳过正在使用的资源
             if self.reference_counts.get(resource_id, 0) > 1:
                 continue
             
-            # 记录要卸载的资源
-            resources_to_unload.append((resource_id, resource_type))
-            
+            # 计算资源的优先级分数（最久未使用的分数最高）
+            priority_score = current_time - last_used
+            resources_to_consider.append((priority_score, resource_id, resource_type))
+        
+        # 按优先级分数降序排序（先释放最久未使用的资源）
+        resources_to_consider.sort(key=lambda x: x[0], reverse=True)
+        
+        # 选择要卸载的资源
+        resources_to_unload = []
+        for priority_score, resource_id, resource_type in resources_to_consider:
             # 估计释放的空间
             if resource_type == "texture":
                 freed_space += self._calculate_texture_memory_usage({})
             elif resource_type == "mesh":
                 freed_space += self._calculate_mesh_memory_usage({})
+            
+            # 记录要卸载的资源
+            resources_to_unload.append((resource_id, resource_type))
             
             # 如果已经释放了足够的空间，停止
             if freed_space >= target_space:
@@ -755,9 +1163,13 @@ class ResourceManager:
         del self.textures[texture_id]
         del self.reference_counts[texture_id]
         
-        # 从优先级队列中移除
+        # 从所有优先级数据结构中移除
         if texture_id in self.resource_priority:
             del self.resource_priority[texture_id]
+        if texture_id in self.resource_last_used:
+            del self.resource_last_used[texture_id]
+        if texture_id in self.resource_type_map:
+            del self.resource_type_map[texture_id]
         
         # 更新VRAM使用量
         self.current_vram_usage_mb -= memory_usage
@@ -781,9 +1193,13 @@ class ResourceManager:
         del self.meshes[mesh_id]
         del self.reference_counts[mesh_id]
         
-        # 从优先级队列中移除
+        # 从所有优先级数据结构中移除
         if mesh_id in self.resource_priority:
             del self.resource_priority[mesh_id]
+        if mesh_id in self.resource_last_used:
+            del self.resource_last_used[mesh_id]
+        if mesh_id in self.resource_type_map:
+            del self.resource_type_map[mesh_id]
         
         # 更新VRAM使用量
         self.current_vram_usage_mb -= memory_usage
@@ -954,18 +1370,19 @@ class ResourceManager:
     def _update_resource_priority(self, resource_id, resource_type):
         """
         更新资源优先级
-        将最近使用的资源移到优先级队列的末尾
+        更新资源的最后使用时间
         
         Args:
             resource_id: 资源ID
             resource_type: 资源类型
         """
-        # 如果资源已在队列中，移除它
-        if resource_id in self.resource_priority:
-            del self.resource_priority[resource_id]
+        # 获取当前时间作为最后使用时间
+        current_time = time.time()
         
-        # 将资源添加到队列末尾（最近使用）
-        self.resource_priority[resource_id] = resource_type
+        # 更新资源优先级信息
+        self.resource_priority[resource_id] = (current_time, resource_type)
+        self.resource_last_used[resource_id] = current_time
+        self.resource_type_map[resource_id] = resource_type
     
     def _reload_all_textures_for_quality(self, quality):
         """

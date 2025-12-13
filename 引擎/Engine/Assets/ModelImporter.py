@@ -6,7 +6,7 @@
 import os
 import struct
 import numpy as np
-from Engine.Math.Math import Vector3, Vector2, BoundingBox
+from Engine.Math import Vector3, Vector2, BoundingBox
 from Engine.Renderer.Resources.Mesh import Mesh
 from Engine.Renderer.Resources.Material import Material
 

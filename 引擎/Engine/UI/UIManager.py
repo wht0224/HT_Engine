@@ -1,6 +1,7 @@
-# -*- coding: utf-8 -*-
 """
-UI管理器，负责管理所有UI控件和事件处理
+游戏世界的控制台指挥官！
+负责管理所有UI按钮、滑块、菜单等交互元素
+让玩家能够轻松操控游戏世界
 """
 
 from Engine.UI.Controls.Button import Button
@@ -12,7 +13,10 @@ from Engine.UI.Event import Event
 from Engine.UI.Event import EventType
 
 class UIManager:
-    """UI管理器，负责管理所有UI控件和事件处理"""
+    """游戏世界的交互指挥官！
+    负责管理所有UI按钮、滑块、菜单等交互元素
+    让玩家能够轻松操控游戏世界
+    """
     
     def __init__(self, platform):
         """初始化UI管理器

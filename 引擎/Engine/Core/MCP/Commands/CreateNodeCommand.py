@@ -6,7 +6,7 @@ MCP架构 - 创建节点命令
 
 from Engine.Core.MCP.Commands.Command import Command
 from Engine.Scene.SceneNode import SceneNode
-from Engine.Math.Math import Vector3, Quaternion, Matrix4x4
+from Engine.Math import Vector3, Quaternion, Matrix4x4
 
 class CreateNodeCommand(Command):
     """创建节点命令

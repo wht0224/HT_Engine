@@ -215,14 +215,15 @@ class RenderProcessor:
             self.engine.renderer.shadow_map_resolution = self.render_settings["shadow_map_resolution"]
     
     def render(self):
-        """渲染场景
+        """
+        渲染场景
         
         Returns:
             dict: 渲染统计信息
         """
-        if self.engine.renderer and self.engine.scene_manager:
+        if self.engine.renderer and self.engine.scene_mgr:
             # 使用引擎的渲染器进行渲染
-            stats = self.engine.renderer.render(self.engine.scene_manager)
+            stats = self.engine.renderer.render(self.engine.scene_mgr)
             
             # 更新渲染统计
             if stats is not None:
@@ -374,9 +375,9 @@ class AnimationProcessor:
             delta_time: 帧时间
         """
         # 更新场景中的动画
-        if self.engine.scene_manager:
+        if hasattr(self.engine, 'scene_mgr') and self.engine.scene_mgr:
             # 遍历所有节点，更新动画
-            self._update_node_animations(self.engine.scene_manager.root_node, delta_time)
+            self._update_node_animations(self.engine.scene_mgr.root_node, delta_time)
     
     def _update_node_animations(self, node, delta_time):
         """更新节点的动画

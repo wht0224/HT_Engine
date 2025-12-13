@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-低端GPU渲染引擎场景管理系统
-负责场景图的组织、更新和渲染优化
+游戏世界的总导演！
+负责搭建舞台、安排演员、控制镜头和灯光
+让整个游戏世界在舞台上完美呈现
 """
 
 import time
@@ -11,24 +12,25 @@ import numpy as np
 
 # 确保正确导入Math模块
 from Engine.Math import Vector3, Matrix4x4, Quaternion
-from Renderer.Resources import ResourceManager
-from Renderer.Shaders import ShaderManager
-from Scene.SceneNode import SceneNode
-from Scene.Camera import Camera
-from Scene.Light import LightManager
-from Utils.PerformanceMonitor import PerformanceMonitor
+from Engine.Renderer.Resources import ResourceManager
+from Engine.Renderer.Shaders import ShaderManager
+from .SceneNode import SceneNode
+from .Camera import Camera
+from .Light import LightManager
+from Engine.Utils.PerformanceMonitor import PerformanceMonitor
 
 
 class SceneManager:
-    """场景管理器
-    管理整个场景图、相机、灯光以及场景更新和渲染流程
+    """游戏世界的总导演！
+    负责管理整个舞台：场景图、相机、灯光、演员调度
+    让每个元素都在正确的时间出现在正确的位置
     """
     
     def __init__(self, engine=None):
-        """初始化场景管理器
+        """搭建游戏世界的舞台
         
         Args:
-            engine: 渲染引擎实例（可选）
+            engine: 魔法引擎的指挥中心（可选）
         """
         # 导入日志系统
         from Engine.Logger import get_logger
@@ -37,8 +39,8 @@ class SceneManager:
         # 引擎引用
         self.engine = engine
         self.renderer = engine.renderer if engine else None
-        self.resource_manager = engine.resource_manager if engine else None
-        self.shader_manager = engine.renderer.shader_manager if engine and engine.renderer else None
+        self.resource_manager = engine.res_mgr if engine else None
+        self.shader_manager = engine.renderer.shader_mgr if engine and engine.renderer else None
         
         # 场景根节点
         self.root_node = SceneNode("root")
@@ -277,13 +279,13 @@ class SceneManager:
         camera.set_perspective(60, 16/9, 0.1, 1000.0)
         
         # 创建方向光（太阳光）
-        from Scene.Light import DirectionalLight
+        from .Light import DirectionalLight
         sun = DirectionalLight("Sun", direction=Vector3(-1, -1, -1), color=Vector3(1, 0.95, 0.8), intensity=1.0)
         sun.cast_shadows = True
         self.add_light(sun)
-        
+
         # 创建环境光
-        from Scene.Light import AmbientLight
+        from .Light import AmbientLight
         ambient = AmbientLight("Ambient", color=Vector3(0.2, 0.2, 0.2), intensity=0.5)
         self.add_light(ambient)
         

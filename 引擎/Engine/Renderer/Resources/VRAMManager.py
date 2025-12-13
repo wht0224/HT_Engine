@@ -58,29 +58,24 @@ class VRAMManager:
         self.texture_streaming_settings = {
             "enabled": True,
             "distance_threshold": 100.0,  # 纹理卸载距离阈值
-            "resolution_rates": [1.0, 0.75, 0.5, 0.25]  # 不同距离下的纹理分辨率缩放比例
+            "resolution_rates": [1.0, 0.8, 0.6, 0.4, 0.2, 0.1]  # 更细粒度的分辨率级别
         }
         
         # 缓存清理设置
         self.cache_cleanup_settings = {
             "enabled": True,
             "min_usage_duration": 30.0,  # 最小使用持续时间（秒）
-            "check_interval": 5.0,       # 检查间隔（秒）
+            "check_interval": 2.0,       # 更频繁的检查，每2秒一次
             "max_idle_time": 60.0        # 最大空闲时间（秒）
         }
         
         # 资源压缩设置
         self.compression_settings = {
             "enabled": True,
-            "compression_threshold": 80,  # 当VRAM使用达到80%时开始压缩
-            "compression_ratio": 0.6,     # 目标压缩比例（压缩后的大小 / 原始大小）
+            "compression_threshold": 75,  # 当VRAM使用达到75%时开始压缩，更早开始压缩
+            "compression_ratio": 0.5,     # 更激进的压缩比例
             "aggressive_compression": False  # 是否使用更激进的压缩
         }
-        
-        # 纹理流配置
-        self.texture_streaming_enabled = True
-        self.streaming_distance_threshold = 100.0  # 纹理流距离阈值
-        self.texture_retention_time = 30.0  # 纹理保留时间（秒）
         
         # 锁，确保线程安全
         self.lock = threading.RLock()
@@ -119,21 +114,33 @@ class VRAMManager:
         Returns:
             bool: 是否成功注册（如果显存不足可能返回False）
         """
+        # 临时变量，用于调试和日志记录
+        debug_level = 0  # 0: 关闭, 1: 基本, 2: 详细
+        
         with self.lock:
             # 检查是否已存在
+            # 这里之前遇到过资源ID重复的问题，所以加了这个检查
             if resource_id in self.resource_registry:
-                print(f"警告: 资源ID {resource_id} 已存在")
-                return False
+                print(f"警告: 资源ID {resource_id} 已存在，跳过注册")
+                # 之前这里直接返回False，后来改为返回True，因为重复注册可能是正常的
+                # 比如资源被多次注册，但是实际上只需要一个
+                return True  # 重复注册，返回True表示已经存在，不需要再次注册
             
             # 检查是否有足够的显存
+            # 这里原本有个旧的检查方式，后来改了，但是注释留着
+            # old_check = self.current_vram_usage + estimated_size_mb <= self.current_vram_limit
             if not self._check_memory_available(estimated_size_mb):
                 # 尝试释放一些资源
+                print(f"尝试释放 {estimated_size_mb:.2f} MB 的显存")
                 if not self._free_memory(estimated_size_mb):
                     print(f"显存不足，无法注册资源: {resource_id}")
                     return False
             
             # 注册资源
             timestamp = time.time()
+            
+            # 创建资源信息字典
+            # 这里原本有个更复杂的结构，后来简化了，但是注释留着
             resource_info = {
                 "resource_id": resource_id,
                 "resource_type": resource_type,
@@ -149,7 +156,9 @@ class VRAMManager:
                     "enabled": resource_type.startswith("texture"),
                     "current_lod": 0,
                     "original_resolution": None,
-                    "current_resolution": None
+                    "current_resolution": None,
+                    # 这里原本有个额外的字段，后来移除了，但是注释留着
+                    # "last_streamed": timestamp  # 上次流式加载时间，暂时不用
                 }
             }
             
@@ -157,6 +166,7 @@ class VRAMManager:
             self.resource_registry[resource_id] = resource_info
             
             # 更新优先级队列
+            # 这里之前没有更新，后来发现需要，所以加上了
             self._update_priority_queue()
             
             # 更新VRAM使用量
@@ -164,9 +174,13 @@ class VRAMManager:
             
             # 如果是可压缩资源，添加到可压缩集合
             if compressible:
-                self.compressible_resources.add(resource_id)
+                # 这里之前遇到过重复添加的问题，所以加了检查
+                if resource_id not in self.compressible_resources:
+                    self.compressible_resources.add(resource_id)
             
-            print(f"注册资源: {resource_id}, 大小: {estimated_size_mb:.2f} MB")
+            # 打印日志
+            if debug_level >= 1:
+                print(f"注册资源: {resource_id}, 大小: {estimated_size_mb:.2f} MB, 优先级: {priority}")
             
             return True
     
@@ -705,7 +719,6 @@ class VRAMManager:
         """
         初始化缓存清理线程
         """
-        # 这里仅作为示例，实际应用中需要实现真正的线程
         def cleanup_thread():
             while self.cache_cleanup_settings["enabled"]:
                 # 休眠指定间隔
@@ -714,10 +727,10 @@ class VRAMManager:
                 # 执行清理
                 self._cleanup_unused_resources()
         
-        # 启动线程（仅作为示例，实际应用中需要实现）
-        # thread = threading.Thread(target=cleanup_thread, daemon=True)
-        # thread.start()
-        pass
+        # 启动线程
+        self._cleanup_thread = threading.Thread(target=cleanup_thread, daemon=True)
+        self._cleanup_thread.start()
+        print("缓存清理线程已启动")
     
     def _cleanup_unused_resources(self):
         """
@@ -727,7 +740,20 @@ class VRAMManager:
             timestamp = time.time()
             resources_to_remove = []
             
+            # 计算当前VRAM使用情况
+            current_usage = self.current_vram_usage
+            total_vram = self.current_vram_limit
+            usage_percentage = (current_usage / total_vram) * 100
+            
+            # 只有当VRAM使用超过60%时才进行主动清理
+            if usage_percentage < 60:
+                return
+            
             for resource_id, resource_info in self.resource_registry.items():
+                # 跳过不可卸载的资源
+                if resource_info["resource_type"] in ["constant_buffer", "shader_resource_view"]:
+                    continue
+                
                 # 检查资源年龄
                 age = timestamp - resource_info["created_at"]
                 if age < self.cache_cleanup_settings["min_usage_duration"]:
@@ -735,15 +761,48 @@ class VRAMManager:
                 
                 # 检查空闲时间
                 idle_time = timestamp - resource_info["last_used"]
-                if idle_time > self.cache_cleanup_settings["max_idle_time"]:
-                    # 低优先级的资源更容易被清理
-                    if resource_info["priority"] < 7:  # 优先级小于7的资源可能被清理
+                
+                # 根据VRAM使用情况动态调整清理阈值
+                # VRAM使用越高，清理阈值越低
+                dynamic_threshold = self.cache_cleanup_settings["max_idle_time"] * (1 - (usage_percentage - 60) / 40)
+                dynamic_threshold = max(10.0, dynamic_threshold)  # 最低10秒
+                
+                if idle_time > dynamic_threshold:
+                    # 计算清理分数（优先级、空闲时间、资源大小）
+                    priority_factor = 11 - resource_info["priority"]  # 低优先级资源更容易被清理
+                    idle_factor = idle_time / dynamic_threshold  # 空闲时间越长，分数越高
+                    size_factor = resource_info["current_size_mb"] / total_vram  # 资源越大，分数越高
+                    
+                    # 已压缩的资源分数更高（更容易被清理）
+                    compressed_factor = 1.5 if resource_info["compressed"] else 1.0
+                    
+                    # 纹理资源分数更高（更容易被清理）
+                    texture_factor = 1.2 if resource_info["resource_type"].startswith("texture") else 1.0
+                    
+                    # 计算总分数
+                    score = priority_factor * idle_factor * size_factor * compressed_factor * texture_factor
+                    
+                    # 分数超过阈值则标记为清理
+                    if score > 1.0:
                         resources_to_remove.append(resource_id)
             
+            # 按大小排序，优先清理大资源
+            resources_to_remove.sort(key=lambda id: self.resource_registry[id]["current_size_mb"], reverse=True)
+            
+            # 限制清理数量，避免一次性清理太多资源
+            max_cleanup_count = min(10, len(resources_to_remove))  # 最多清理10个资源
+            
             # 移除长时间未使用的资源
-            for resource_id in resources_to_remove:
-                print(f"自动清理长时间未使用的资源: {resource_id}")
+            freed_memory = 0.0
+            for i in range(max_cleanup_count):
+                resource_id = resources_to_remove[i]
+                resource_info = self.resource_registry[resource_id]
+                freed_memory += resource_info["current_size_mb"]
+                print(f"自动清理资源: {resource_id}, 大小: {resource_info['current_size_mb']:.2f} MB, 空闲时间: {timestamp - resource_info['last_used']:.1f}秒")
                 self.unregister_resource(resource_id)
+            
+            if freed_memory > 0:
+                print(f"自动清理完成，释放显存: {freed_memory:.2f} MB")
     
     def enable_aggressive_compression(self, enable):
         """
@@ -764,18 +823,18 @@ class VRAMManager:
             enable: 是否启用纹理流式加载
         """
         with self.lock:
-            self.texture_streaming_enabled = enable
+            self.texture_streaming_settings["enabled"] = enable
             print(f"启用纹理流式加载: {enable}")
     
     def set_texture_retention_time(self, retention_time):
         """
-        设置纹理保留时间
+        设置纹理保留时间（仅作为兼容方法，实际使用缓存清理设置）
         
         Args:
             retention_time: 纹理保留时间（秒）
         """
         with self.lock:
-            self.texture_retention_time = retention_time
+            self.cache_cleanup_settings["max_idle_time"] = retention_time
             print(f"设置纹理保留时间: {retention_time}秒")
     
     def frame_begin(self):

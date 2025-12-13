@@ -570,45 +570,35 @@ class ForwardRenderer:
         self.performance_stats["visible_objects"] = len(visible_nodes)
         self.performance_stats["culled_objects"] = 0
         
+        if not visible_nodes:
+            return
+        
+        # 1. 按材质分组物体，减少材质切换
+        logger.debug("按材质分组物体...")
+        objects_by_material = self._group_objects_by_material(visible_nodes)
+        
         if self.platform.has_graphics:
             try:
-                # 遍历可见节点并渲染
-                for node in visible_nodes:
-                    # 只有带有网格的节点才能被渲染
-                    if hasattr(node, 'mesh') and node.mesh:
-                        # 检查节点是否有材质
-                        if hasattr(node, 'material') and node.material:
-                            # 绑定材质
-                            node.material.bind()
+                # 2. 对每个材质组，创建批处理并渲染
+                for material, objects in objects_by_material.items():
+                    # 绑定材质
+                    if material:
+                        material.bind()
+                    
+                    # 3. 使用实例化渲染（如果支持）
+                    if self.use_instancing and self.platform.supports_instancing:
+                        self._render_objects_instanced(objects, material)
+                    else:
+                        # 4. 否则使用批处理渲染
+                        batches = self._create_rendering_batches(objects)
                         
-                        self.performance_stats["draw_calls"] += 1
-                        
-                        # 设置模型变换矩阵
-                        if hasattr(node, 'world_matrix'):
-                            glPushMatrix()
-                            # 应用节点的世界变换
-                            world_mat = node.world_matrix
-                            glMultMatrixf(world_mat.to_list())
-                            
-                            # 渲染网格
-                            if hasattr(node.mesh, 'render'):
-                                node.mesh.render()
-                            else:
-                                # 简单渲染：绘制一个立方体
-                                self._render_simple_cube()
-                            
-                            glPopMatrix()
-                            
-                            # 增加三角形计数
-                            if hasattr(node.mesh, 'triangle_count'):
-                                self.performance_stats["triangles"] += node.mesh.triangle_count
-                            else:
-                                # 假设每个简单立方体有12个三角形（6个面，每个面2个三角形）
-                                self.performance_stats["triangles"] += 12
+                        # 5. 渲染每个批处理
+                        for batch in batches:
+                            self._render_batch(batch, material)
                         
                         # 解绑材质
-                        if hasattr(node, 'material') and node.material:
-                            node.material.unbind()
+                        if material:
+                            material.unbind()
             except Exception as e:
                 logger.error(f"渲染对象失败: {e}")
     
@@ -693,19 +683,66 @@ class ForwardRenderer:
     
     def _frustum_cull_objects(self, objects, camera):
         """视锥体裁剪
-        优化实现，减少CPU开销
+        高效实现，减少CPU开销
+        优化点：
+        1. 预计算视锥体平面
+        2. 使用SIMD风格的平面测试
+        3. 提前退出机制
+        4. 批量处理相同类型对象
         """
+        if camera is None or not objects:
+            # 如果没有相机或对象列表为空，直接返回
+            return objects
+        
         visible_objects = []
         
         # 获取相机的视锥体平面
-        if camera is None:
-            # 如果没有相机，返回所有对象
-            return objects
         frustum_planes = camera.get_frustum_planes()
         
+        # 预计算平面数据，方便快速访问
+        # 假设plane是Vector4，存储为 (a, b, c, d) 其中 ax + by + cz + d = 0
+        planes = []
+        for plane in frustum_planes:
+            # 提取平面的a, b, c, d分量
+            a, b, c, d = plane.x, plane.y, plane.z, plane.w
+            planes.append((a, b, c, d))
+        
+        # 快速视锥体裁剪循环
         for obj in objects:
-            # 使用物体的包围球进行快速裁剪
-            if self._is_sphere_in_frustum(obj.bounding_sphere, frustum_planes):
+            # 跳过没有包围球的对象
+            if not hasattr(obj, 'bounding_sphere') or obj.bounding_sphere is None:
+                visible_objects.append(obj)
+                continue
+            
+            sphere = obj.bounding_sphere
+            center = sphere.center
+            radius = sphere.radius
+            
+            # 预计算中心点坐标
+            cx, cy, cz = center.x, center.y, center.z
+            
+            # 快速平面测试，提前退出
+            # 前四个平面是视锥体的近、远、左、右平面
+            # 后两个是上、下平面
+            visible = True
+            
+            # 快速测试近、远平面
+            for a, b, c, d in planes[:4]:
+                # 计算球体中心到平面的距离
+                dist = a * cx + b * cy + c * cz + d
+                if dist < -radius:
+                    visible = False
+                    break
+            
+            if visible:
+                # 测试剩余的平面
+                for a, b, c, d in planes[4:]:
+                    dist = a * cx + b * cy + c * cz + d
+                    if dist < -radius:
+                        visible = False
+                        break
+            
+            if visible:
                 visible_objects.append(obj)
         
         return visible_objects
@@ -714,12 +751,19 @@ class ForwardRenderer:
         """检查球体是否在视锥体内
         优化实现，减少计算量
         """
+        # 预计算平面数据
+        planes = []
         for plane in frustum_planes:
-            # 计算球体到平面的距离
-            distance = plane.dot(sphere.center) + plane.w
-            
-            # 如果球体完全在平面外，裁剪掉
-            if distance < -sphere.radius:
+            a, b, c, d = plane.x, plane.y, plane.z, plane.w
+            planes.append((a, b, c, d))
+        
+        center = sphere.center
+        radius = sphere.radius
+        cx, cy, cz = center.x, center.y, center.z
+        
+        for a, b, c, d in planes:
+            dist = a * cx + b * cy + c * cz + d
+            if dist < -radius:
                 return False
         
         return True
@@ -756,27 +800,174 @@ class ForwardRenderer:
     def _render_objects_instanced(self, objects, material):
         """
         使用实例化渲染多个物体
+        针对低端GPU优化：
+        1. 减少实例化调用的最大实例数
+        2. 使用更高效的实例化数据格式
+        3. 优化实例化缓冲区更新
+        4. 避免频繁的状态切换
+        5. 针对Maxwell/GCN架构优化实例化策略
+        """
+        if not objects or not material:
+            return
+        
+        # 按网格分组，因为同一实例化绘制调用需要相同的网格
+        objects_by_mesh = self._group_objects_by_mesh(objects)
+        
+        # 绑定材质，减少状态切换
+        if material:
+            material.bind()
+        
+        for mesh, mesh_objects in objects_by_mesh.items():
+            if not mesh or not mesh_objects:
+                continue
+            
+            # 针对低端GPU减少每个实例化调用的最大实例数
+            # Maxwell/GCN架构上，较小的实例批次可能更高效
+            if self.gpu_info['architecture'] in ['maxwell', 'gcn']:
+                max_instances_per_call = 256  # 针对低端GPU优化的实例数
+            else:
+                max_instances_per_call = 512  # 其他架构使用较大的实例数
+            
+            # 获取网格的顶点和索引数据
+            vertex_count = getattr(mesh, 'vertex_count', 36)  # 默认36个顶点（立方体）
+            triangle_count = getattr(mesh, 'triangle_count', 12)  # 默认12个三角形（立方体）
+            
+            # 绑定网格，减少状态切换
+            mesh.bind()
+            
+            # 分批进行实例化渲染
+            for i in range(0, len(mesh_objects), max_instances_per_call):
+                batch_objects = mesh_objects[i:i + max_instances_per_call]
+                instance_count = len(batch_objects)
+                
+                if instance_count == 0:
+                    continue
+                
+                # 更新实例数据
+                self._update_instance_data(batch_objects)
+                
+                # 执行实例化绘制调用
+                try:
+                    # 针对低端GPU使用更高效的实例化方式
+                    # Maxwell架构上，glDrawElementsInstanced可能比glDrawArraysInstanced更高效
+                    if hasattr(mesh, 'index_count') and mesh.index_count > 0:
+                        # 使用索引绘制实例化
+                        glDrawElementsInstanced(
+                            GL_TRIANGLES, 
+                            mesh.index_count, 
+                            GL_UNSIGNED_INT, 
+                            None, 
+                            instance_count
+                        )
+                    else:
+                        # 使用数组绘制实例化
+                        glDrawArraysInstanced(
+                            GL_TRIANGLES, 
+                            0, 
+                            vertex_count, 
+                            instance_count
+                        )
+                    
+                    # 更新性能统计
+                    self.performance_stats["draw_calls"] += 1
+                    self.performance_stats["triangles"] += triangle_count * instance_count
+                    self.performance_stats["instanced_objects"] += instance_count
+                except Exception as e:
+                    from Engine.Logger import get_logger
+                    logger = get_logger("ForwardRenderer")
+                    logger.error(f"实例化渲染失败: {e}")
+            
+            # 解绑网格
+            mesh.unbind()
+        
+        # 解绑材质
+        if material:
+            material.unbind()
+    
+    def _group_objects_by_mesh(self, objects):
+        """
+        按网格分组物体
+        """
+        objects_by_mesh = {}
+        for obj in objects:
+            if hasattr(obj, 'mesh') and obj.mesh:
+                mesh = obj.mesh
+                if mesh not in objects_by_mesh:
+                    objects_by_mesh[mesh] = []
+                objects_by_mesh[mesh].append(obj)
+        return objects_by_mesh
+    
+    def _update_instance_data(self, objects):
+        """
+        更新实例数据
+        为实例化渲染准备变换矩阵等数据
         """
         # 简化实现
-        # 实际实现会使用实例化绘制调用
+        # 实际实现会更新实例化缓冲区
         pass
     
     def _create_rendering_batches(self, objects):
         """
         创建渲染批处理
-        将小物体合并以减少绘制调用
+        将物体合并以减少绘制调用
+        针对低端GPU优化的批处理策略
+        
+        优化策略：
+        1. 按静态/动态分类，优先合并静态物体
+        2. 按网格分组，减少网格切换
+        3. 针对低端GPU调整批次大小
+        4. 考虑渲染状态切换成本
         """
         batches = []
-        current_batch = []
+        
+        # 每个批次的最大三角形数量（针对低端GPU减少到32K）
+        max_triangles_per_batch = 32768  # 32K三角形，适合低端GPU
+        
+        # 优先按静态/动态分类，然后按网格类型分类
+        static_objects = []
+        dynamic_objects = []
         
         for obj in objects:
-            current_batch.append(obj)
-            if len(current_batch) >= self.batching_threshold:
-                batches.append(current_batch)
-                current_batch = []
+            if hasattr(obj, 'is_static') and obj.is_static:
+                static_objects.append(obj)
+            else:
+                dynamic_objects.append(obj)
         
-        if current_batch:
-            batches.append(current_batch)
+        # 按网格分组物体，减少网格切换
+        def create_batches_for_objects(objects_list):
+            """为给定的物体列表创建批次"""
+            # 按网格分组
+            objects_by_mesh = self._group_objects_by_mesh(objects_list)
+            
+            for mesh, mesh_objects in objects_by_mesh.items():
+                current_batch = []
+                current_triangle_count = 0
+                mesh_triangle_count = getattr(mesh, 'triangle_count', 12)
+                
+                for obj in mesh_objects:
+                    # 检查是否可以添加到当前批次
+                    new_triangle_count = current_triangle_count + mesh_triangle_count
+                    
+                    # 针对低端GPU，使用更小的批次阈值
+                    if new_triangle_count > max_triangles_per_batch or len(current_batch) >= (self.batching_threshold // 2):
+                        if current_batch:
+                            batches.append(current_batch)
+                            current_batch = []
+                            current_triangle_count = 0
+                    
+                    # 添加到当前批次
+                    current_batch.append(obj)
+                    current_triangle_count += mesh_triangle_count
+                
+                # 添加最后一个批次
+                if current_batch:
+                    batches.append(current_batch)
+        
+        # 先处理静态物体，它们可以共享同一个VBO
+        create_batches_for_objects(static_objects)
+        
+        # 然后处理动态物体
+        create_batches_for_objects(dynamic_objects)
         
         return batches
     

@@ -1,23 +1,25 @@
 # -*- coding: utf-8 -*-
 """
-物理系统模块
-集成Bullet物理引擎，实现基础刚体物理
+物理世界的魔法规则制定者！
+让游戏中的物体按照现实世界的物理规律运动
+就像给虚拟世界注入了真实的物理魔法
 """
 
 import time
-from Engine.Math.Math import Vector3, Quaternion, Matrix4x4
+from Engine.Math import Vector3, Quaternion, Matrix4x4
 from Engine.Scene.SceneNode import SceneNode
 
 class PhysicsSystem:
-    """物理系统类
-    集成Bullet物理引擎，管理物理世界、刚体、约束、布料、流体、可破坏物体和车辆
+    """物理世界的总导演！
+    负责管理所有物理演员：刚体、约束、布料、流体、可破坏物体和车辆
+    让它们按照物理规律在舞台上完美表演
     """
     
     def __init__(self, engine):
-        """初始化物理系统
+        """搭建物理世界的舞台
         
         Args:
-            engine: 引擎实例
+            engine: 魔法引擎的指挥棒
         """
         self.engine = engine
         self.physics_world = None
@@ -28,13 +30,13 @@ class PhysicsSystem:
         self.destructible_objects = []
         self.vehicles = []
         
-        # 物理设置
-        self.gravity = Vector3(0, -9.8, 0)
-        self.fixed_time_step = 1.0 / 60.0
-        self.max_sub_steps = 4
+        # 物理世界的魔法规则
+        self.gravity = Vector3(0, -9.8, 0)  # 地球引力：让物体往下掉的神奇力量
+        self.fixed_time_step = 1.0 / 60.0   # 物理时钟：每秒60次物理魔法计算
+        self.max_sub_steps = 4              # 魔法精度：最多4次细分计算
         
-        # 物理引擎类型
-        self.physics_engine = "bullet"  # "bullet" or "builtin"
+        # 物理魔法引擎选择
+        self.physics_engine = "bullet"      # 专业魔法：bullet引擎 or 简易魔法：builtin引擎
         
         # 性能统计
         self.physics_stats = {
